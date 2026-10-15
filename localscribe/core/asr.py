@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,40 @@ def lost_speech(speech: list[tuple[float, float]], words: list[Word], min_speech
         if run is not None and run[2] >= min_speech:
             stretches.append((run[0], run[1]))
     return stretches
+
+
+# Closing lines Whisper writes on its own, longest first (see drop_sign_offs).
+_SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
+              ("thanks", "for", "watching"), ("thank", "you"), ("thanks",)]
+
+
+def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
+    """`words` without the sign-offs Whisper invents where speech stops or there is none.
+
+    Large-v3 closes a clip that was cut mid-sentence, or a clip of hum, murmur or music, with
+    a stand-alone "Thank you." or "Thanks for watching!". In synthetic tests it was unsure of
+    the first word of these (p 0.02-0.26) and sure of spoken thanks (p 0.79 or more, also
+    quiet or over chatter). So a sign-off that ends a sentence and starts with a word below
+    `max_p` is dropped; "Thank you for the question" goes on, so it stays.
+    """
+    kept, i = [], 0
+    while i < len(words):
+        length = _sign_off_length(words, i) if words[i].prob < max_p else 0
+        if length:
+            i += length
+        else:
+            kept.append(words[i])
+            i += 1
+    return kept
+
+
+def _sign_off_length(words: list[Word], i: int) -> int:
+    for phrase in _SIGN_OFFS:
+        span = words[i:i + len(phrase)]
+        if (len(span) == len(phrase) and span[-1].text.rstrip().endswith((".", "!", "?"))
+                and tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) == phrase):
+            return len(phrase)
+    return 0
 
 
 def speech_clips(audio: np.ndarray, threshold: float = 0.2, max_len: float = 28.0,

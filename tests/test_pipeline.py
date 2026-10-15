@@ -279,7 +279,7 @@ def test_device_probe_failure_still_reports_hardware(monkeypatch):
     assert len(received) == 1 and received[0] is not None and received[0].cuda is False
 
 
-# ---- A7: speech the voice detector heard but Whisper didn't write -------------------
+# ---- speech the voice detector heard but Whisper didn't write ------------------------
 def long_recording(monkeypatch, seconds=80):
     monkeypatch.setattr(pipeline, "load_audio", lambda path, **kw: np.zeros(16000 * seconds, np.float32))
 
@@ -299,6 +299,24 @@ def test_silence_after_the_text_does_not_warn(fake_models, monkeypatch):
     engine = make_engine(fake_models, device="cpu")
     transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
     assert transcript.warnings == []
+
+
+def test_lost_speech_hidden_by_invented_thanks_still_warns(fake_models, monkeypatch):
+    # Split by the invented "Thank you.", neither half reaches 30 s of speech.
+    long_recording(monkeypatch)
+    FakeTranscriber.speech = [(0.0, 4.0), (4.5, 32.0), (32.5, 55.0)]
+    FakeTranscriber.words = WORDS + [Word(30.0, 30.3, " Thank", 0.15), Word(30.3, 30.6, " you.", 0.99)]
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == [{"key": "warn_lost_speech", "times": "0:04–0:55"}]
+
+
+# ---- sign-offs Whisper invents ------------------------------------------------------
+def test_invented_thank_you_is_removed(fake_models):
+    FakeTranscriber.words = WORDS[:2] + [Word(1.0, 1.2, " Thank", 0.07), Word(1.2, 1.4, " you.", 0.99)] + WORDS[2:]
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "talk.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert " ".join(s.text for s in transcript.segments) == "Hello, everyone. Thanks Sam."
 
 
 # ---- shared ------------------------------------------------------------------------

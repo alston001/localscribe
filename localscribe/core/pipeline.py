@@ -18,7 +18,7 @@ from typing import Callable, TypeVar
 from .. import __version__
 from . import device as dev
 from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
-from .asr import AsrResult, lost_speech
+from .asr import AsrResult, drop_sign_offs, lost_speech
 from .diarization import SpeakerCount, Turn
 from .errors import Cancelled, UserError
 from .media import SAMPLE_RATE, load_audio, mmss
@@ -258,6 +258,10 @@ class Engine:
         report("transcribe", 1.0)
         if cancel is not None and cancel.is_set():
             raise Cancelled()
+        heard = len(asr.words)
+        asr.words = drop_sign_offs(asr.words)
+        if len(asr.words) < heard:
+            self.log(f"{path.name}: removed {heard - len(asr.words)} word(s) of invented sign-offs (\"Thank you.\")")
         if not asr.words:
             raise UserError("err_no_speech")
 
