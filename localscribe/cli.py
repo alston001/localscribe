@@ -1,6 +1,7 @@
 """Command line: batch-convert files without the window.
 
     python -m localscribe.cli interview.mp4 meeting.m4a -f docx,srt -s 2
+    python -m localscribe.cli week3.m4a --vocabulary "NLP class"
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from .core.errors import Cancelled, UserError  # noqa: E402
 from .core.pipeline import Engine, EngineSettings, JobOptions, Progress  # noqa: E402
 from .export import FORMATS, write_outputs  # noqa: E402
 from .export.common import ExportOptions  # noqa: E402
+from .vocabulary import (PROMPT_LIMIT, find_vocabulary, fit_terms, join_terms, load_vocabularies,  # noqa: E402
+                         prompt_terms, token_counter)
 
 
 def parse_speakers(text: str) -> SpeakerCount:
@@ -58,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-timestamps", action="store_true")
     p.add_argument("--speaker-label", default="Speaker")
     p.add_argument("--hotwords", default="", help="names and terms to help spelling")
+    p.add_argument("--vocabulary", default="", metavar="NAME",
+                   help="a word bank made in the app; its terms come before --hotwords")
     p.add_argument("--models-dir", type=Path, default=None)
     p.add_argument("--headings", default="en", choices=list(i18n.LANGUAGES), help="language of headings in files")
     args = p.parse_args(argv)
@@ -66,6 +71,16 @@ def main(argv: list[str] | None = None) -> int:
     unknown = [f for f in formats if f not in FORMATS]
     if unknown:
         p.error(f"unknown format(s): {', '.join(unknown)}")
+    vocabulary = None
+    if args.vocabulary:
+        try:
+            saved = load_vocabularies()
+        except OSError as exc:
+            p.error(f"could not read the word banks ({exc})")
+        vocabulary = find_vocabulary(saved, args.vocabulary)
+        if vocabulary is None:
+            names = ", ".join(v.name for v in saved) or "none yet, make one in the app"
+            p.error(f"no word bank called '{args.vocabulary}' (saved: {names})")
     i18n.set_language(args.headings)
 
     engine = Engine(EngineSettings(models_dir=args.models_dir or paths.default_models_dir(),
@@ -73,9 +88,20 @@ def main(argv: list[str] | None = None) -> int:
                                    whisper_model=args.model, device=args.device,
                                    diarizer=args.diarizer, fast_mode=args.fast),
                     log=lambda m: print(f"\r  {m}".ljust(90)))
+    terms = prompt_terms(vocabulary, args.hotwords)
+    if terms:  # "auto" names the model by its GPU check, which the first file needs anyway
+        counter = token_counter(engine.store, engine.whisper_name())
+        kept, dropped = fit_terms(terms, counter)
+        if dropped and counter.exact:
+            terms = kept
+            print(f"warning: {len(dropped)} term(s) go over Whisper's limit of {PROMPT_LIMIT} tokens "
+                  f"and are left out: {join_terms(dropped)}")
+        elif dropped:  # an estimate can be off either way, so Whisper keeps what really fits
+            print(f"warning: by an estimate, {len(dropped)} term(s) may not fit in Whisper's limit of "
+                  f"{PROMPT_LIMIT} tokens: {join_terms(dropped)}")
     opts = JobOptions(language=None if args.language == "auto" else args.language,
                       speakers=args.speakers, normalize=args.normalize,
-                      denoise=args.denoise, hotwords=args.hotwords, speaker_prefix=args.speaker_label)
+                      denoise=args.denoise, hotwords=join_terms(terms), speaker_prefix=args.speaker_label)
     export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps)
 
     def show(p: Progress) -> None:
@@ -88,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         started = time.monotonic()
         try:
             transcript = engine.transcribe_file(path, opts, progress=show)
+            if vocabulary is not None:
+                transcript.settings["vocabulary"] = vocabulary.name
             written = write_outputs(transcript, args.output_dir or path.parent, formats, export_options)
             print(f"\r  done in {time.monotonic() - started:.1f}s".ljust(90))
             for warning in transcript.warnings:

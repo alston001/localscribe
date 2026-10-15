@@ -42,6 +42,7 @@ class Settings:
     diarizer: str = "auto"
     fast_mode: bool = False
     hotwords: str = ""
+    vocabulary: str = ""           # chosen word bank's name; "" = none
     speaker_label: str = "Speaker"
     subtitle_speakers: bool = True
     models_dir: str = ""           # "" = default location
@@ -125,10 +126,12 @@ class Settings:
                               whisper_model=self.whisper_model, device=self.device,
                               diarizer=self.diarizer, fast_mode=self.fast_mode)
 
-    def job_options(self) -> JobOptions:
+    def job_options(self, hotwords: str | None = None) -> JobOptions:
+        """`hotwords`: the word bank's terms combined with this field's (see vocabulary.prompt_terms)."""
         return JobOptions(language=None if self.language == "auto" else self.language,
                           speakers=self.speaker_count(), normalize=self.normalize, denoise=self.denoise,
-                          hotwords=self.hotwords, speaker_prefix=self.speaker_label)
+                          hotwords=self.hotwords if hotwords is None else hotwords,
+                          speaker_prefix=self.speaker_label)
 
     def export_options(self, ui_language: str) -> ExportOptions:
         return ExportOptions(lang=ui_language, timestamps=self.timestamps,

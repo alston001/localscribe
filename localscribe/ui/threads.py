@@ -64,6 +64,7 @@ class Task:
     formats: list[str]
     export_options: ExportOptions
     output_dir: Path | None
+    vocabulary: str = ""  # the word bank's name, recorded in the transcript
 
 
 class ProcessThread(QThread):
@@ -107,6 +108,8 @@ class ProcessThread(QThread):
 
         try:
             transcript = self.engine.transcribe_file(task.path, task.options, progress=report, cancel=self.cancel)
+            if task.vocabulary:
+                transcript.settings["vocabulary"] = task.vocabulary
             self.job_progress.emit(task.job_id, "export", 0.99, "")
             written = write_outputs(transcript, task.output_dir or task.path.parent, task.formats,
                                     task.export_options)

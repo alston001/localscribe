@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import subprocess
@@ -21,11 +22,14 @@ from ..core.media import MEDIA_EXTENSIONS, probe
 from ..core.pipeline import Engine
 from ..export import FORMATS
 from ..i18n import tr
+from ..vocabulary import (PROMPT_LIMIT, TokenCounter, Vocabulary, find_vocabulary, fit_terms, join_terms,
+                          load_vocabularies, prompt_terms, replace_vocabulary, save_vocabularies, token_counter)
 from . import style
 from .convert_dialog import ConvertDialog
 from .jobs import JobTableModel, QueueView
 from .settings_dialog import SettingsDialog, _fill
 from .threads import DeviceProbe, DurationProbe, ProcessThread, Task
+from .vocabulary_picker import VocabularyEditor, VocabularyPicker
 
 log = logging.getLogger("localscribe")
 
@@ -41,6 +45,11 @@ class MainWindow(QMainWindow):
         self.run_results = {"ok": 0, "bad": 0}
         self._helpers: list = []  # keeps short-lived probe threads alive
         self._closing = False  # Quit was confirmed; the worker is stopping
+        try:
+            self.vocabularies = load_vocabularies()
+        except OSError:  # e.g. locked by another program; editing tries again (_change_vocabularies)
+            log.warning("Could not read the word banks", exc_info=True)
+            self.vocabularies = []
         self.model = JobTableModel(self)
         self._build()
         self._load_settings()
@@ -108,7 +117,7 @@ class MainWindow(QMainWindow):
         self.grp_options = QGroupBox()
         form = QFormLayout(self.grp_options)
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        form.setVerticalSpacing(8)
+        form.setVerticalSpacing(6)  # 8 left the default window 4 px short once the word bank row came in
         self.lbl_preset = QLabel()
         self.cmb_preset = QComboBox()
         self.cmb_preset.currentIndexChanged.connect(self._on_preset)
@@ -119,6 +128,13 @@ class MainWindow(QMainWindow):
         self.cmb_language = QComboBox()
         self.cmb_language.currentIndexChanged.connect(self._on_option_changed)
         form.addRow(self.lbl_language, self.cmb_language)
+        self.lbl_vocabulary = QLabel()
+        self.cmb_vocabulary = VocabularyPicker()
+        self.cmb_vocabulary.picked.connect(self._on_vocabulary_picked)
+        self.cmb_vocabulary.new_requested.connect(self._new_vocabulary)
+        self.cmb_vocabulary.edit_requested.connect(self._edit_vocabulary)
+        self.cmb_vocabulary.delete_requested.connect(self._delete_vocabulary)
+        form.addRow(self.lbl_vocabulary, self.cmb_vocabulary)
 
         self.lbl_speakers = QLabel()
         self.cmb_spk_mode = QComboBox()
@@ -244,6 +260,10 @@ class MainWindow(QMainWindow):
         _fill(self.cmb_preset, [(p, tr(f"preset_{p}")) for p in PRESET_ORDER], s.preset)
         self.lbl_language.setText(tr("language"))
         _fill(self.cmb_language, [(code, name or tr("lang_auto")) for code, name in LANGUAGE_CHOICES], s.language)
+        self.lbl_vocabulary.setText(tr("vocabulary"))
+        self.lbl_vocabulary.setToolTip(tr("vocabulary_tip"))
+        self.cmb_vocabulary.setToolTip(tr("vocabulary_tip"))
+        self.cmb_vocabulary.set_vocabularies(self.vocabularies, s.vocabulary)
         self.lbl_speakers.setText(tr("speakers"))
         _fill(self.cmb_spk_mode, [(m, tr(f"spk_{m}")) for m in ("auto", "exact", "range")], s.speaker_mode)
         self.lbl_to.setText(tr("spk_to"))
@@ -323,6 +343,67 @@ class MainWindow(QMainWindow):
             self.settings.save_dir = str(Path(folder))
             self.txt_dir.setText(self.settings.save_dir)
             self._save_settings()
+
+    # ------------------------------------------------------------ word banks
+    def _on_vocabulary_picked(self, name: str) -> None:
+        self.settings.vocabulary = name
+        self._save_settings()
+
+    def _new_vocabulary(self, name_hint: str = "") -> None:
+        self._open_vocabulary_editor(None, name_hint)
+
+    def _edit_vocabulary(self, name: str) -> None:
+        vocabulary = find_vocabulary(self.vocabularies, name)
+        if vocabulary is not None:
+            self._open_vocabulary_editor(vocabulary)
+
+    def _open_vocabulary_editor(self, original: Vocabulary | None, name_hint: str = "") -> None:
+        taken = [v.name for v in self.vocabularies if v is not original]
+        dialog = VocabularyEditor(original, taken, self._token_counter(), self.settings.hotwords, name_hint, self)
+        if dialog.exec() == VocabularyEditor.Accepted:
+            self._save_vocabulary(original, dialog.vocabulary())
+
+    def _save_vocabulary(self, original: Vocabulary | None, result: Vocabulary) -> None:
+        """Adds a new word bank and picks it, or replaces an edited one; a renamed pick stays picked."""
+        if not self._change_vocabularies(original.name if original else "", result):
+            return
+        s = self.settings
+        if original is None or find_vocabulary([original], s.vocabulary):
+            s.vocabulary = result.name
+            self._save_settings()
+        self.cmb_vocabulary.set_vocabularies(self.vocabularies, s.vocabulary)
+
+    def _delete_vocabulary(self, name: str) -> None:
+        vocabulary = find_vocabulary(self.vocabularies, name)
+        if vocabulary is None or not self._confirm_delete(vocabulary.name):
+            return
+        if not self._change_vocabularies(vocabulary.name, None):
+            return
+        if find_vocabulary([vocabulary], self.settings.vocabulary):
+            self.settings.vocabulary = ""
+            self._save_settings()
+        self.cmb_vocabulary.set_vocabularies(self.vocabularies, self.settings.vocabulary)
+
+    def _change_vocabularies(self, old_name: str, new: Vocabulary | None) -> bool:
+        """Applies one change to the file as it is now, so word banks that another LocalScribe
+        window saved in the meantime survive. False, after saying why, if that fails."""
+        try:
+            changed = replace_vocabulary(load_vocabularies(), old_name, new)
+            save_vocabularies(changed)
+        except OSError as exc:
+            log.exception("Could not save the word banks")
+            QMessageBox.warning(self, APP_NAME, tr("vocab_save_failed", detail=str(exc)))
+            return False
+        self.vocabularies = changed
+        return True
+
+    def _confirm_delete(self, name: str) -> bool:
+        box = QMessageBox(QMessageBox.Question, APP_NAME, tr("vocab_delete_confirm", name=name), parent=self)
+        box.setTextFormat(Qt.PlainText)  # a name with "<" must not turn into HTML
+        delete = box.addButton(tr("vocab_delete"), QMessageBox.DestructiveRole)
+        box.setDefaultButton(box.addButton(tr("cancel"), QMessageBox.RejectRole))
+        box.exec()
+        return box.clickedButton() is delete
 
     def open_converter(self) -> None:
         dialog = ConvertDialog(self.settings, [j.path for j in self._selected_jobs()], self)
@@ -450,9 +531,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, tr("no_folder"))
             return
         self.engine.update_settings(s.engine_settings())
-        self.run_template = Task(0, Path(), s.job_options(), list(s.formats),
+        terms = self._terms_for_run(ask=not continuing)
+        if terms is None:
+            return
+        hotwords, vocabulary = terms
+        self.run_template = Task(0, Path(), s.job_options(hotwords=hotwords), list(s.formats),
                                  s.export_options(i18n.current_language()),
-                                 Path(s.save_dir) if s.save_mode == "custom" else None)
+                                 Path(s.save_dir) if s.save_mode == "custom" else None, vocabulary)
         worker = ProcessThread(self.engine, self)
         worker.job_started.connect(self._on_job_started)
         worker.job_progress.connect(self._on_job_progress)
@@ -469,10 +554,42 @@ class MainWindow(QMainWindow):
         self._set_running(True)
 
     def _enqueue(self, job) -> None:
-        t = self.run_template
         job.status, job.progress, job.stage, job.error, job.error_details = "queued", 0.0, "", "", ""
-        self.worker.add(Task(job.id, job.path, t.options, t.formats, t.export_options, t.output_dir))
+        self.worker.add(dataclasses.replace(self.run_template, job_id=job.id, path=job.path))
         self.model.refresh(job.id)
+
+    def _terms_for_run(self, ask: bool) -> tuple[str, str] | None:
+        """(hotwords for Whisper, word bank name). Terms past Whisper's limit are listed first
+        instead of being cut off silently; None when the user goes back to shorten the list."""
+        vocabulary = find_vocabulary(self.vocabularies, self.settings.vocabulary)
+        counter = self._token_counter()
+        kept, dropped = fit_terms(prompt_terms(vocabulary, self.settings.hotwords), counter)
+        if dropped and ask and not self._confirm_dropped_terms(dropped, counter.exact):
+            return None
+        if dropped and counter.exact:  # the count only: terms can be people's names
+            log.info("Left out %d term(s) past Whisper's limit of %d tokens", len(dropped), PROMPT_LIMIT)
+        elif dropped:  # an estimate can be off either way, so Whisper keeps what really fits
+            kept += dropped
+        return join_terms(kept), vocabulary.name if vocabulary else ""
+
+    def _token_counter(self) -> TokenCounter:
+        """Counts with the tokenizer of the Whisper model that will run, once that is known."""
+        if self.settings.whisper_model == "auto" and self.device_info is None:
+            return TokenCounter()  # "auto" depends on the GPU, which is still being detected
+        return token_counter(self.engine.store, self.engine.whisper_name())
+
+    def _confirm_dropped_terms(self, dropped: list[str], exact: bool) -> bool:
+        shown = ", ".join(dropped[:40])
+        if len(dropped) > 40:
+            shown += " " + tr("vocab_dropped_more", n=len(dropped) - 40)
+        intro = tr("vocab_dropped" if exact else "vocab_dropped_estimate", limit=PROMPT_LIMIT, n=len(dropped))
+        box = QMessageBox(QMessageBox.Warning, APP_NAME, f"{intro}\n\n{shown}", parent=self)
+        box.setTextFormat(Qt.PlainText)
+        box.setInformativeText(tr("vocab_dropped_question"))
+        start = box.addButton(tr("vocab_start_anyway"), QMessageBox.AcceptRole)
+        box.setDefaultButton(box.addButton(tr("vocab_go_back"), QMessageBox.RejectRole))
+        box.exec()
+        return box.clickedButton() is start
 
     def stop(self) -> None:
         if self.worker is not None:
