@@ -63,7 +63,7 @@ def assign_speakers(words: list[Word], turns: list[Turn]) -> tuple[list[str], np
 
 
 def sentence_spans(words: list[Word], pause: float = 1.5) -> list[tuple[int, int]]:
-    """[start, end) word ranges split at sentence punctuation or long pauses."""
+    """[start, end) word ranges split at sentence punctuation or pauses over `pause` s."""
     spans, start = [], 0
     for k, word in enumerate(words):
         last = k == len(words) - 1
@@ -83,10 +83,11 @@ def _runs(labels: list[str], start: int, end: int):
 
 def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
                     max_words: int = 2, max_duration: float = 1.0,
-                    majority: float = 0.7) -> list[str]:
-    """Fix boundary jitter: Whisper timestamps are ~0.1-0.3 s off, so the first or last
-    word of a sentence often lands in the neighbouring speaker's turn."""
-    labels = list(labels)
+                    majority: float = 0.7, pause: float = 0.3) -> list[str]:
+    """Fix boundary jitter: Whisper timestamps are ~0.1-0.3 s off and diarization turns
+    start or end a little late or early, so the first or last words of a sentence often
+    land in the neighbouring speaker's turn."""
+    given, labels = labels, list(labels)
     spans = sentence_spans(words)
     for s, e in spans:
         share: dict[str, float] = {}
@@ -101,6 +102,29 @@ def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
             if labels[rs] != major and re_ - rs <= max_words \
                     and words[re_ - 1].end - words[rs].start <= max_duration:
                 labels[rs:re_] = [major] * (re_ - rs)
+
+    def held(k: int) -> float:
+        """Seconds of word k inside its current speaker's turns (an upper bound if relabelled)."""
+        part = coverage[k] if labels[k] == given[k] else 1.0 - coverage[k]
+        return part * max(words[k].end - words[k].start, 0.02)
+
+    # A sentence, or a stretch between pauses (longer than Whisper leaves inside fluent
+    # speech), split one or two words from its start or end goes whole to the speaker of
+    # the rest, with no majority needed, so the change lands at the sentence end or pause
+    # instead of "Give / me an example". If both parts are that short, the one with less
+    # time in its speaker's turns follows the other. Edge words that sit in their
+    # speaker's turn for over max_duration seconds are a real change and stay.
+    for s, e in sentence_spans(words, pause):
+        runs = list(_runs(labels, s, e))
+        if len(runs) != 2:
+            continue
+        seconds = [sum(held(k) for k in range(rs, re_)) for rs, re_ in runs]
+        short = [re_ - rs <= max_words and sec <= max_duration for (rs, re_), sec in zip(runs, seconds)]
+        if not any(short):
+            continue
+        moved = seconds.index(min(seconds)) if all(short) else short.index(True)
+        rs, re_ = runs[moved]
+        labels[rs:re_] = [labels[runs[1 - moved][0]]] * (re_ - rs)
 
     # A lone weakly-covered word between two words of the same speaker joins them,
     # unless it is a whole sentence on its own ("Yes.").
