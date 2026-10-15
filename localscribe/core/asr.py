@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -26,6 +27,43 @@ class AsrResult:
     language: str
     language_probability: float
     words: list[Word]
+    # (start, end) seconds in which the voice detector heard speech: what Whisper was given.
+    speech: list[tuple[float, float]] = field(default_factory=list)
+
+
+def lost_speech(speech: list[tuple[float, float]], words: list[Word], min_speech: float = 30.0,
+                max_pause: float = 10.0) -> list[tuple[float, float]]:
+    """Stretches in which the voice detector heard at least `min_speech` seconds of speech but
+    Whisper wrote no words; pauses of up to `max_pause` seconds don't end a stretch.
+
+    Real silence holds no detected speech, so it never counts, and scattered noises in a long
+    quiet stretch (a cough, a chair) are cut apart by the pauses between them.
+    """
+    gaps, edge = [], 0.0
+    for word in sorted(words, key=lambda w: w.start):
+        if word.start > edge:
+            gaps.append((edge, word.start))
+        edge = max(edge, word.end)
+    gaps.append((edge, math.inf))
+
+    stretches = []
+    for gap_start, gap_end in gaps:
+        if gap_end - gap_start < min_speech:
+            continue
+        run = None  # [start, end, seconds of speech]
+        for start, end in speech:
+            start, end = max(start, gap_start), min(end, gap_end)
+            if end <= start:
+                continue
+            if run is not None and start - run[1] <= max_pause:
+                run[1], run[2] = end, run[2] + end - start
+                continue
+            if run is not None and run[2] >= min_speech:
+                stretches.append((run[0], run[1]))
+            run = [start, end, end - start]
+        if run is not None and run[2] >= min_speech:
+            stretches.append((run[0], run[1]))
+    return stretches
 
 
 def speech_clips(audio: np.ndarray, threshold: float = 0.2, max_len: float = 28.0,
@@ -72,9 +110,14 @@ class Transcriber:
                        hotwords=hotwords or None, initial_prompt=initial_prompt)
         if batch_size > 1:
             from faster_whisper import BatchedInferencePipeline
+            from faster_whisper.vad import VadOptions, get_speech_timestamps
 
+            # The pipeline's own defaults, spelled out so `speech` holds the regions it decodes.
+            vad = VadOptions(max_speech_duration_s=30, min_silence_duration_ms=160)
             segments, info = BatchedInferencePipeline(self.model).transcribe(
-                audio, batch_size=batch_size, vad_filter=True, **options)
+                audio, batch_size=batch_size, vad_filter=True, vad_parameters=vad, **options)
+            speech = [(r["start"] / SAMPLE_RATE, r["end"] / SAMPLE_RATE)
+                      for r in get_speech_timestamps(audio, vad)]
         else:
             clips = speech_clips(audio)
             if not clips:
@@ -83,6 +126,7 @@ class Transcriber:
             segments, info = self.model.transcribe(
                 audio, vad_filter=False, clip_timestamps=[t for clip in clips for t in clip],
                 condition_on_previous_text=False, **options)
+            speech = list(clips)
 
         words: list[Word] = []
         for seg in segments:  # generator: decoding happens while iterating
@@ -96,4 +140,4 @@ class Transcriber:
             if progress is not None and duration > 0:
                 progress(min(seg.end / duration, 1.0))
         words.sort(key=lambda w: w.start)
-        return AsrResult(info.language, float(info.language_probability), words)
+        return AsrResult(info.language, float(info.language_probability), words, speech)

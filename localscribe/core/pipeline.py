@@ -18,10 +18,10 @@ from typing import Callable, TypeVar
 from .. import __version__
 from . import device as dev
 from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
-from .asr import AsrResult
+from .asr import AsrResult, lost_speech
 from .diarization import SpeakerCount, Turn
 from .errors import Cancelled, UserError
-from .media import SAMPLE_RATE, load_audio
+from .media import SAMPLE_RATE, load_audio, mmss
 from .models import ModelStore
 from .transcript import Segment, Transcript, TWord
 
@@ -294,6 +294,7 @@ class Engine:
         elif self.settings.device == "cuda" and device == "cpu":
             self.log("Settings ask for the GPU, but no CUDA GPU is available; running on CPU")
             warnings.append({"key": "warn_cuda_unavailable"})
+        warnings += _lost_speech_warnings(asr)
         if diarize:
             warnings += _speaker_warnings(turns, len(transcript.speakers), opts.speakers)
         transcript.warnings = warnings
@@ -305,6 +306,13 @@ class Engine:
         self.log(f"{path.name}: {len(transcript.speakers)} speaker(s), "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in timings.items()))
         return transcript
+
+
+def _lost_speech_warnings(asr: AsrResult) -> list[dict]:
+    stretches = lost_speech(asr.speech, asr.words)
+    if not stretches:
+        return []
+    return [{"key": "warn_lost_speech", "times": ", ".join(f"{mmss(s)}–{mmss(e)}" for s, e in stretches)}]
 
 
 def _speaker_warnings(turns: list[Turn], found: int, count: SpeakerCount) -> list[dict]:

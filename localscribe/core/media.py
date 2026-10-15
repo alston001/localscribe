@@ -121,7 +121,7 @@ def audio_filters(normalize: bool, denoise: bool) -> list[str]:
     return filters
 
 
-def _mmss(seconds: float) -> str:
+def mmss(seconds: float) -> str:
     seconds = int(round(seconds))
     return f"{seconds // 60}:{seconds % 60:02d}"
 
@@ -135,7 +135,7 @@ def length_warning(info: MediaInfo, seconds: float) -> dict | None:
     a missing stretch of audio is not. A duration estimated from the bitrate can't tell.
     """
     if info.duration and not info.duration_estimated and seconds < info.duration - _PARTIAL_TOLERANCE_S:
-        return {"key": "warn_partial_decode", "decoded": _mmss(seconds), "expected": _mmss(info.duration)}
+        return {"key": "warn_partial_decode", "decoded": mmss(seconds), "expected": mmss(info.duration)}
     return None
 
 
