@@ -1,4 +1,4 @@
-; Inno Setup 6 script: per-user installer (no administrator rights needed).
+﻿; Inno Setup 6 script: per-user installer (no administrator rights needed).
 ; 1. Build dist\LocalScribe with packaging\build.ps1
 ; 2. Compile:  "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" packaging\installer.iss
 ; The build is ~5 GB, so the installer is split into setup.exe + .bin files; keep them together.
@@ -48,3 +48,16 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// The deepest bundled file is ~140 characters below {app}; Windows paths stop at 260.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (CurPageID = wpSelectDir) and (Length(WizardDirValue) > 110) then
+  begin
+    MsgBox('This folder path is too long for Windows (260-character limit). Please choose a shorter folder, e.g. C:\LocalScribe.'
+      + #13#10#13#10 + '安裝路徑太長（Windows 路徑上限 260 字元），請選擇較短的資料夾，例如 C:\LocalScribe。', mbError, MB_OK);
+    Result := False;
+  end;
+end;
