@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from .errors import Cancelled, UserError
-from .media import _NO_WINDOW, LOCAL_INPUT_ONLY, best_audio_stream, ffmpeg_exe, probe
+from .media import _NO_WINDOW, LOCAL_INPUT_ONLY, best_audio_stream, ffmpeg_exe, length_warning, probe
 
 # id -> (extension, ffmpeg muxer, codec arguments)
 CONVERT_FORMATS = {
@@ -35,9 +35,11 @@ def unique_path(folder: Path, stem: str, ext: str) -> Path:
 
 def convert_file(src: str | Path, folder: str | Path | None, fmt: str,
                  progress: Callable[[float], None] | None = None,
-                 cancel: threading.Event | None = None) -> Path:
+                 cancel: threading.Event | None = None, warnings: list[dict] | None = None) -> Path:
     """Writes the converted file next to the source (or into `folder`) and returns its path.
-    Existing files are never overwritten; recording metadata (title, date) is kept."""
+    Existing files are never overwritten; recording metadata (title, date) is kept. A file
+    that came out clearly shorter than the source claims is kept, with a "warn_partial_decode"
+    entry appended to `warnings`."""
     src = Path(src)
     ext, muxer, codec_args = CONVERT_FORMATS[fmt]
     info = probe(src)
@@ -88,6 +90,10 @@ def convert_file(src: str | Path, folder: str | Path | None, fmt: str,
         detail = b"".join(errors).decode("utf-8", "replace").strip().splitlines()
         raise UserError("err_convert", detail=detail[-1] if detail else f"ffmpeg exit {proc.returncode}")
     os.replace(partial, target)
+    written = probe(target).duration  # measure what was written, not what ffmpeg reported
+    warning = length_warning(info, written) if written is not None else None
+    if warning and warnings is not None:
+        warnings.append(warning)
     if progress:
         progress(1.0)
     return target

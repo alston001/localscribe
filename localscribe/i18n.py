@@ -47,6 +47,8 @@ STRINGS: dict[str, tuple[str, str]] = {
     "convert_add_queue": ("轉完後加入轉錄清單", "Add converted files to the transcription list"),
     "convert_start": ("開始轉檔", "Convert"),
     "convert_done": ("轉檔完成：{ok} 個成功，{bad} 個失敗。", "Conversion finished: {ok} succeeded, {bad} failed."),
+    "convert_stopped": ("已停止轉檔：{ok} 個成功，{bad} 個失敗。", "Conversion stopped: {ok} succeeded, {bad} failed."),
+    "convert_warn_note": ("其中 {n} 個有提醒，請看清單。", "Warnings for {n}; see the list."),
     "close": ("關閉", "Close"),
     "cancel": ("取消", "Cancel"),
     # statuses
@@ -120,8 +122,8 @@ STRINGS: dict[str, tuple[str, str]] = {
     "no_folder": ("請選擇儲存的資料夾。", "Choose a folder to save to."),
     "all_done": ("全部完成：{ok} 個成功，{bad} 個失敗。", "Finished: {ok} succeeded, {bad} failed."),
     "still_stopping": ("仍在停止目前的工作，請稍候再關閉。", "Still stopping the current work. Try closing again in a moment."),
-    "confirm_quit": ("正在轉換中。關閉程式會中斷目前的工作，確定要關閉嗎？",
-                     "A conversion is running. Closing will stop it. Close anyway?"),
+    "confirm_quit": ("正在轉錄中。關閉程式會中斷目前的工作，確定要關閉嗎？",
+                     "A transcription is running. Closing will stop it. Close anyway?"),
     "error_title": ("發生錯誤", "Something went wrong"),
     # settings dialog
     "general": ("一般", "General"),

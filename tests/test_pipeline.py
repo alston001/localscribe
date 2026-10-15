@@ -126,6 +126,42 @@ def test_minor_decode_errors_on_complete_audio_stay_quiet(tmp_path, monkeypatch)
     assert warnings == []
 
 
+@pytest.mark.parametrize("fmt, args", [("m4a", ["-c:a", "aac", "-movflags", "+faststart"]),
+                                       ("mp3", ["-c:a", "libmp3lame"])])
+def test_a_file_cut_off_halfway_warns(tmp_path, fmt, args):
+    # ffmpeg reads a truncated file without complaint (exit code 0): the length must decide.
+    from test_media import ffmpeg
+
+    full = tmp_path / f"full.{fmt}"
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=300:duration=20", "-ar", "16000", *args, str(full))
+    cut = tmp_path / f"cut.{fmt}"
+    data = full.read_bytes()
+    cut.write_bytes(data[: len(data) // 2])
+    warnings: list[dict] = []
+    media.load_audio(cut, warnings=warnings)
+    assert [w["key"] for w in warnings] == ["warn_partial_decode"]
+    assert warnings[0]["expected"] == "0:20"
+
+
+def test_an_estimated_duration_is_not_trusted(tmp_path, monkeypatch):
+    monkeypatch.setattr(media, "probe", lambda path: media.MediaInfo(600.0, [], duration_estimated=True))
+    monkeypatch.setattr(media, "ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(media.subprocess, "Popen", FakeFfmpeg(seconds=500, code=0))
+    warnings: list[dict] = []
+    media.load_audio(tmp_path / "vbr.mp3", warnings=warnings)
+    assert warnings == []
+
+
+def test_probe_notices_an_estimated_duration(monkeypatch):
+    out = (b"[mp3 @ 0000] Estimating duration from bitrate, this may be inaccurate\n"
+           b"  Duration: 00:10:00.00, start: 0.000000, bitrate: 128 kb/s\n"
+           b"  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 128 kb/s\n")
+    monkeypatch.setattr(media, "ffmpeg_exe", lambda: "ffmpeg")
+    monkeypatch.setattr(media.subprocess, "run", lambda cmd, **k: types.SimpleNamespace(stderr=out, returncode=1))
+    info = media.probe("vbr.mp3")
+    assert info.duration == 600.0 and info.duration_estimated
+
+
 def test_partial_decode_warning_reaches_the_transcript(fake_models, monkeypatch):
     def cut_short(path, warnings=None, **kw):
         warnings.append({"key": "warn_partial_decode", "decoded": "0:10", "expected": "5:00"})

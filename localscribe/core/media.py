@@ -27,6 +27,7 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 # Anchored to the start of a line: a metadata tag such as a title can contain the same text.
 _DURATION_RE = re.compile(r"(?m)^\s*Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 _AUDIO_RE = re.compile(r"(?m)^\s*Stream #\d+:\d+\S*: Audio: (.+)")
+_ESTIMATED_RE = re.compile(r"(?m)^\[\w+ @ [^\]]*\] Estimating duration from bitrate")
 # Put before "-i": a playlist or other crafted file must not make ffmpeg open network URLs.
 LOCAL_INPUT_ONLY = ["-protocol_whitelist", "file,pipe"]
 _PARTIAL_TOLERANCE_S = 2.0  # container durations are not sample-exact
@@ -73,6 +74,7 @@ class AudioStream:
 class MediaInfo:
     duration: float | None
     audio: list[AudioStream]
+    duration_estimated: bool = False  # guessed from the bitrate (e.g. VBR MP3 without a header)
 
 
 def probe(path: str | Path) -> MediaInfo:
@@ -93,7 +95,7 @@ def probe(path: str | Path) -> MediaInfo:
     for i, found in enumerate(_AUDIO_RE.finditer(text)):
         parts = [p.strip() for p in found.group(1).split(",")]
         streams.append(AudioStream(i, parts[0], _channel_count(parts[2]) if len(parts) > 2 else 2))
-    return MediaInfo(duration, streams)
+    return MediaInfo(duration, streams, bool(_ESTIMATED_RE.search(text)))
 
 
 def probe_duration(path: str | Path) -> float | None:
@@ -122,6 +124,19 @@ def audio_filters(normalize: bool, denoise: bool) -> list[str]:
 def _mmss(seconds: float) -> str:
     seconds = int(round(seconds))
     return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def length_warning(info: MediaInfo, seconds: float) -> dict | None:
+    """A warn_partial_decode warning when only `seconds` came out of a file whose header
+    promises clearly more; None when the lengths agree or the header's length is only a guess.
+
+    A damaged or cut-off file still hands over what could be read, and ffmpeg often exits
+    with 0 on a truncated one, so the length decides. Small glitches are common and harmless;
+    a missing stretch of audio is not. A duration estimated from the bitrate can't tell.
+    """
+    if info.duration and not info.duration_estimated and seconds < info.duration - _PARTIAL_TOLERANCE_S:
+        return {"key": "warn_partial_decode", "decoded": _mmss(seconds), "expected": _mmss(info.duration)}
+    return None
 
 
 def load_audio(path: str | Path, normalize: bool = False, denoise: bool = False,
@@ -168,11 +183,7 @@ def load_audio(path: str | Path, normalize: bool = False, denoise: bool = False,
         raise UserError("err_decode", detail=detail[-1] if detail else f"ffmpeg exit {proc.returncode}")
     if usable == 0:
         raise UserError("err_no_audio")
-    decoded = usable / 4 / SAMPLE_RATE
-    # ffmpeg exits non-zero on damaged files but still hands over what it could read. Small
-    # glitches are common and harmless; a missing stretch of audio is not.
-    if (proc.returncode != 0 and warnings is not None and info.duration
-            and decoded < info.duration - _PARTIAL_TOLERANCE_S):
-        warnings.append({"key": "warn_partial_decode", "decoded": _mmss(decoded),
-                         "expected": _mmss(info.duration)})
+    warning = length_warning(info, usable / 4 / SAMPLE_RATE)
+    if warning and warnings is not None:
+        warnings.append(warning)
     return np.frombuffer(data[:usable], dtype=np.float32).copy()

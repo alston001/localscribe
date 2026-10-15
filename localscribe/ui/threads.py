@@ -127,7 +127,7 @@ class ProcessThread(QThread):
 class ConvertThread(QThread):
     file_started = Signal(int)
     file_progress = Signal(int, float)
-    file_done = Signal(int, str)
+    file_done = Signal(int, str, list)  # row, output path, translated warnings
     file_failed = Signal(int, str)
     file_stopped = Signal(int)
 
@@ -143,11 +143,14 @@ class ConvertThread(QThread):
             if self.cancel.is_set():
                 break
             self.file_started.emit(row)
+            warnings: list[dict] = []
             try:
-                out = convert_file(path, self.folder, self.fmt, cancel=self.cancel,
+                out = convert_file(path, self.folder, self.fmt, cancel=self.cancel, warnings=warnings,
                                    progress=lambda f, r=row: self.file_progress.emit(r, f))
                 log.info("Converted %s -> %s", path.name, Path(out).name)
-                self.file_done.emit(row, str(out))
+                for warning in warnings:
+                    log.warning("%s: %s", path.name, tr_warning(warning))
+                self.file_done.emit(row, str(out), [tr_warning(w) for w in warnings])
             except Cancelled:
                 self.file_stopped.emit(row)
                 break

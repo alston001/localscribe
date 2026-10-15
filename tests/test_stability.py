@@ -5,6 +5,9 @@ import importlib.util
 import io
 import json
 import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 import types
@@ -31,6 +34,9 @@ class FakeThread:
     def wait(self, ms=None):
         self.waited += 1
         return self.finishes
+
+    def isRunning(self):
+        return not (self.finishes and self.waited)
 
 
 class FakeEvent:
@@ -98,14 +104,156 @@ def test_cancelled_conversion_reports_the_row_as_stopped(monkeypatch, tmp_path):
     assert stopped == [0]
 
 
-def test_escape_in_the_converter_cancels_and_waits():
+def test_conversion_warnings_reach_the_dialog(monkeypatch, tmp_path):
+    from localscribe import i18n
+    from localscribe.ui.threads import ConvertThread
+
+    warning = {"key": "warn_partial_decode", "decoded": "0:58", "expected": "1:57"}
+
+    def short(src, folder, fmt, warnings=None, **kwargs):
+        warnings.append(warning)
+        return tmp_path / "cut (2).m4a"
+
+    monkeypatch.setattr("localscribe.core.convert.convert_file", short)
+    worker = ConvertThread([(0, tmp_path / "cut.m4a")], None, "m4a")
+    done = []
+    worker.file_done.connect(lambda row, out, warnings: done.append((row, out, warnings)))
+    worker.run()
+    assert done == [(0, str(tmp_path / "cut (2).m4a"), [i18n.tr_warning(warning)])]
+
+
+def test_a_converted_row_with_warnings_says_so():
+    from PySide6.QtWidgets import QStyle
+
+    from localscribe.ui import convert_dialog
+
+    item = types.SimpleNamespace(icon=None, text="", tooltip="", data_=None)
+    item.setIcon = lambda icon: setattr(item, "icon", icon)
+    item.setText = lambda text: setattr(item, "text", text)
+    item.setToolTip = lambda tip: setattr(item, "tooltip", tip)
+    item.setData = lambda role, value: None
+    item.data = lambda role: "C:/rec/cut.m4a"
+    dialog = types.SimpleNamespace(list=types.SimpleNamespace(item=lambda row: item),
+                                   style=lambda: types.SimpleNamespace(standardIcon=lambda which: which),
+                                   outputs=[], completed=0, counts={"ok": 0, "bad": 0, "warn": 0})
+    convert_dialog.ConvertDialog._on_done(dialog, 0, "C:/rec/cut (2).m4a", ["Only 0:58 of 1:57 could be read."])
+    assert item.icon == QStyle.SP_MessageBoxWarning
+    # The warning gets its own line: appended to the file names it was cut off at the list's edge.
+    assert item.text.split("\n") == ["cut.m4a  →  cut (2).m4a", "Only 0:58 of 1:57 could be read."]
+    assert "0:58" in item.tooltip
+    assert dialog.counts == {"ok": 1, "bad": 0, "warn": 1}  # it still produced a file
+
+
+def test_a_long_warning_wraps_instead_of_running_off_the_list(tmp_path):
+    # Real Qt layout, offscreen, in its own process so no QApplication leaks into other tests.
+    script = r'''
+import sys
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+app = QApplication([])
+from localscribe.config import Settings
+from localscribe.ui.convert_dialog import ConvertDialog
+src = Path(sys.argv[1]) / "cut.m4a"
+src.write_bytes(b"")
+dialog = ConvertDialog(Settings(), [src])
+dialog.resize(640, 600)
+dialog.show()
+dialog.completed, dialog.total_files = 0, 1  # as during a run
+dialog._on_done(0, str(src.with_name("cut (4).m4a")),
+                ["The file may be damaged: only 0:58 of 1:57 could be read. " * 2])
+app.processEvents()
+print(dialog.list.horizontalScrollBar().isVisible())
+'''
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    proc = subprocess.run([sys.executable, "-c", script, str(tmp_path)], cwd=ROOT, env=env,
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip().splitlines()[-1] == "False"
+
+
+def test_escape_in_the_converter_cancels_but_keeps_the_dialog_open():
+    from localscribe.ui import convert_dialog
+
+    cancelled = []
+    dialog = types.SimpleNamespace(worker=FakeThread(), _start_or_cancel=lambda: cancelled.append(1))
+    convert_dialog.ConvertDialog.reject(dialog)  # would raise if it reached QDialog.reject
+    assert cancelled == [1] and dialog.worker.waited == 0  # same as Cancel; the list shows "Stopped"
+
+
+def test_closing_the_converter_waits_for_the_conversion():
     from localscribe.ui import convert_dialog
 
     status = types.SimpleNamespace(text="", setText=lambda t: setattr(status, "text", t))
     dialog = types.SimpleNamespace(worker=FakeThread(), lbl_status=status)
     dialog._stop_worker = lambda: convert_dialog.ConvertDialog._stop_worker(dialog)
-    convert_dialog.ConvertDialog.reject(dialog)  # would raise if it reached QDialog.reject
-    assert dialog.worker.cancel.is_set() and dialog.worker.waited == 1 and status.text
+    event = FakeEvent()
+    convert_dialog.ConvertDialog.closeEvent(dialog, event)
+    assert dialog.worker.cancel.is_set() and dialog.worker.waited == 1
+    assert event.result == "ignored" and status.text
+
+
+def finished_summary(cancelled: bool, counts: dict) -> tuple[str, object]:
+    """The converter's status line after a run, and the dialog it was shown on."""
+    from localscribe.ui import convert_dialog
+
+    worker = FakeThread()
+    if cancelled:
+        worker.cancel.set()
+    status = types.SimpleNamespace(text="", setText=lambda t: setattr(status, "text", t))
+    dialog = types.SimpleNamespace(worker=worker, lbl_status=status, completed=0, total_files=1,
+                                   counts=counts, _update_state=lambda: None,
+                                   progress=types.SimpleNamespace(setValue=lambda v: None))
+    convert_dialog.ConvertDialog._on_finished(dialog)
+    return status.text, dialog
+
+
+@pytest.mark.parametrize("cancelled, key", [(True, "convert_stopped"), (False, "convert_done")])
+def test_converter_summary_says_whether_it_was_stopped(cancelled, key):
+    from localscribe import i18n
+
+    text, dialog = finished_summary(cancelled, {"ok": 0, "bad": 0, "warn": 0})
+    assert text == i18n.tr(key, ok=0, bad=0) and dialog.worker is None
+
+
+def test_converter_summary_mentions_warnings():
+    from localscribe import i18n
+
+    text, _ = finished_summary(False, {"ok": 1, "bad": 0, "warn": 1})
+    assert text == f'{i18n.tr("convert_done", ok=1, bad=0)} {i18n.tr("convert_warn_note", n=1)}'
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_warning_note_reads_right_for_one_and_many(n):
+    from localscribe import i18n
+
+    zh, en = (i18n.tr_in(lang, "convert_warn_note", n=n) for lang in ("zh_TW", "en"))
+    assert str(n) in zh and str(n) in en
+    assert " have " not in en and " has " not in en  # no verb that must agree with n
+
+
+def test_a_new_run_resets_the_warning_count():
+    import inspect
+
+    from localscribe.ui import convert_dialog
+
+    source = inspect.getsource(convert_dialog.ConvertDialog._start_or_cancel)
+    assert 'self.counts = {"ok": 0, "bad": 0, "warn": 0}' in source
+
+
+def test_stopped_rows_do_not_look_failed():
+    import inspect
+
+    from localscribe.ui import convert_dialog
+
+    source = inspect.getsource(convert_dialog.ConvertDialog._on_stopped)
+    assert "SP_MediaStop" in source and "Critical" not in source and "BrowserStop" not in source
+
+
+def test_quit_prompt_talks_about_transcription():
+    from localscribe import i18n
+
+    zh, en = i18n.STRINGS["confirm_quit"]
+    assert "轉錄" in zh and "transcription" in en.lower() and "conversion" not in en.lower()
 
 
 # ---- C3: crashes ------------------------------------------------------------------

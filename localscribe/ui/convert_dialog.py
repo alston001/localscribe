@@ -8,8 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
-                               QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QProgressBar, QPushButton, QRadioButton, QStyle, QVBoxLayout)
+                               QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget,
+                               QListWidgetItem, QProgressBar, QPushButton, QRadioButton, QStyle, QVBoxLayout)
 
 from .. import paths
 from ..core.convert import CONVERT_FORMATS
@@ -28,7 +28,7 @@ class ConvertDialog(QDialog):
         self.settings = settings
         self.worker: ConvertThread | None = None
         self.outputs: list[str] = []
-        self.counts = {"ok": 0, "bad": 0}
+        self.counts = {"ok": 0, "bad": 0, "warn": 0}
         self.setWindowTitle(tr("convert_title"))
         self.setMinimumSize(640, 520)
         self.setAcceptDrops(True)
@@ -39,6 +39,9 @@ class ConvertDialog(QDialog):
 
         self.list = QListWidget()
         self.list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        # Long rows (a warning, a long file name) wrap to the list's width instead of scrolling.
+        self.list.setWordWrap(True)
+        self.list.setResizeMode(QListView.Adjust)
         self.list.itemDoubleClicked.connect(self._reveal)
         layout.addWidget(self.list, 1)
         self.lbl_empty = QLabel(tr("convert_drop_hint"), objectName="hint", alignment=Qt.AlignCenter)
@@ -171,7 +174,7 @@ class ConvertDialog(QDialog):
             return
         self.total_files = len(items)
         self.completed = 0
-        self.counts = {"ok": 0, "bad": 0}
+        self.counts = {"ok": 0, "bad": 0, "warn": 0}
         self.progress.setValue(0)
         folder = Path(s.convert_save_dir) if s.convert_save_mode == "custom" else None
         self.worker = ConvertThread(items, folder, s.convert_format, self)
@@ -192,15 +195,18 @@ class ConvertDialog(QDialog):
     def _on_progress(self, row: int, fraction: float) -> None:
         self.progress.setValue(int((self.completed + fraction) / self.total_files * 1000))
 
-    def _on_done(self, row: int, output: str) -> None:
+    def _on_done(self, row: int, output: str, warnings: list) -> None:
         item = self.list.item(row)
-        item.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+        icon = QStyle.SP_MessageBoxWarning if warnings else QStyle.SP_DialogApplyButton
+        item.setIcon(self.style().standardIcon(icon))
         item.setData(_OUTPUT, output)
-        item.setText(f"{Path(item.data(_PATH)).name}  →  {Path(output).name}")
-        item.setToolTip(output)
+        # Warnings go on lines of their own: after the file names they ran off the list's edge.
+        item.setText("\n".join([f"{Path(item.data(_PATH)).name}  →  {Path(output).name}", *warnings]))
+        item.setToolTip("\n".join([output, *warnings]))
         self.outputs.append(output)
         self.completed += 1
         self.counts["ok"] += 1
+        self.counts["warn"] += bool(warnings)
 
     def _on_failed(self, row: int, message: str) -> None:
         item = self.list.item(row)
@@ -212,13 +218,17 @@ class ConvertDialog(QDialog):
 
     def _on_stopped(self, row: int) -> None:
         item = self.list.item(row)
-        item.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        item.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))  # not the red ✕ used for failures
         item.setText(f"{Path(item.data(_PATH)).name}  —  {tr('st_stopped')}")
 
     def _on_finished(self) -> None:
+        stopped = self.worker.cancel.is_set()
         self.worker = None
         self.progress.setValue(int(self.completed / max(self.total_files, 1) * 1000))
-        self.lbl_status.setText(tr("convert_done", ok=self.counts["ok"], bad=self.counts["bad"]))
+        summary = tr("convert_stopped" if stopped else "convert_done", ok=self.counts["ok"], bad=self.counts["bad"])
+        if self.counts["warn"]:
+            summary += " " + tr("convert_warn_note", n=self.counts["warn"])
+        self.lbl_status.setText(summary)
         self._update_state()
 
     def _stop_worker(self) -> bool:
@@ -231,9 +241,13 @@ class ConvertDialog(QDialog):
         self.lbl_status.setText(tr("still_stopping"))
         return False
 
-    def reject(self) -> None:  # Esc
-        if self._stop_worker():
-            super().reject()
+    def reject(self) -> None:
+        # Esc during a conversion works like Cancel: the dialog stays to show what stopped.
+        # (QDialog.closeEvent also calls this, after _stop_worker has already waited.)
+        if self.worker is not None and self.worker.isRunning():
+            self._start_or_cancel()
+            return
+        super().reject()
 
     def closeEvent(self, event) -> None:
         if self._stop_worker():

@@ -78,3 +78,21 @@ def test_convert_rejects_files_without_audio(tmp_path):
     junk.write_text("not audio")
     with pytest.raises(UserError):
         convert_file(junk, tmp_path, "mp3")
+
+
+def test_converting_a_cut_off_file_warns(tmp_path):
+    # ffmpeg converts a truncated file "successfully": only the lengths show what is missing.
+    full = tmp_path / "full.m4a"
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=300:duration=20", "-ar", "16000",
+           "-c:a", "aac", "-movflags", "+faststart", str(full))
+    cut = tmp_path / "cut.m4a"
+    data = full.read_bytes()
+    cut.write_bytes(data[: len(data) // 2])
+    out = tmp_path / "out"
+    warnings: list[dict] = []
+    converted = convert_file(cut, out, "mp3", warnings=warnings)
+    assert converted.exists()  # the readable half is still worth keeping
+    assert [w["key"] for w in warnings] == ["warn_partial_decode"] and warnings[0]["expected"] == "0:20"
+    complete: list[dict] = []
+    convert_file(full, out, "mp3", warnings=complete)
+    assert complete == []
