@@ -23,13 +23,20 @@ from .export.common import ExportOptions  # noqa: E402
 
 
 def parse_speakers(text: str) -> SpeakerCount:
+    """argparse type for --speakers: 'auto', N, or MIN-MAX."""
     text = text.strip().lower()
     if text in ("", "auto"):
         return SpeakerCount()
-    if "-" in text:
-        lo, hi = (int(x) for x in text.split("-", 1))
-        return SpeakerCount(min=lo, max=hi)
-    return SpeakerCount(exact=int(text))
+    try:
+        if "-" in text:
+            lo, hi = (int(x) for x in text.split("-", 1))
+        else:
+            lo = hi = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not 'auto', a number or a range such as 2-6") from None
+    if lo < 1 or hi < lo:
+        raise argparse.ArgumentTypeError(f"'{text}': use 1 or more, and a range from low to high such as 2-6")
+    return SpeakerCount(exact=lo) if "-" not in text else SpeakerCount(min=lo, max=hi)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-f", "--formats", default="docx,txt", help=f"comma-separated: {','.join(FORMATS)}")
     p.add_argument("-o", "--output-dir", type=Path, help="default: next to each input file")
     p.add_argument("-l", "--language", default="en", help="language code such as en, or 'auto'")
-    p.add_argument("-s", "--speakers", default="auto", help="'auto', a number (exactly N), or a range such as 2-6")
+    p.add_argument("-s", "--speakers", default=SpeakerCount(), type=parse_speakers, help="'auto', a number (exactly N), or a range such as 2-6")
     p.add_argument("--model", default="auto", help="auto, large-v3, large-v3-turbo, medium, small, base")
     p.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     p.add_argument("--diarizer", default="auto", choices=["auto", "pyannote", "sherpa"])
@@ -67,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
                                    diarizer=args.diarizer, fast_mode=args.fast),
                     log=lambda m: print(f"\r  {m}".ljust(90)))
     opts = JobOptions(language=None if args.language == "auto" else args.language,
-                      speakers=parse_speakers(args.speakers), normalize=args.normalize,
+                      speakers=args.speakers, normalize=args.normalize,
                       denoise=args.denoise, hotwords=args.hotwords, speaker_prefix=args.speaker_label)
     export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps)
 

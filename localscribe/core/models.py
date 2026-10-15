@@ -56,6 +56,9 @@ SHERPA_SEG = "sherpa-onnx/sherpa-onnx-pyannote-segmentation-3-0/model.onnx"
 SHERPA_EMB = "sherpa-onnx/nemo_en_titanet_large.onnx"
 
 _truststore_done = False
+_ATTEMPTS = 4
+_RETRY_DELAY_S = 2.0  # times the attempt number
+_RETRY_STATUS = {429, 500, 502, 503, 504}  # busy or briefly broken servers
 
 
 def _session(token: str | None = None):
@@ -99,7 +102,8 @@ def hf_list_files(repo: str, token: str | None = None, revision: str = "main") -
     except requests.RequestException as exc:
         raise UserError("err_network", detail=str(exc)) from exc
     _check_auth(resp.status_code)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        raise UserError("err_network", detail=f"HTTP {resp.status_code}")
     files = []
     for item in resp.json():
         if item.get("type") == "file":
@@ -137,21 +141,44 @@ def download_files(jobs: list[tuple[str, Path, int]], token: str | None = None,
             done += size
             report(done, total)
             continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
         part = dest.with_name(dest.name + ".part")
-        for attempt in range(4):
+        _write_step(lambda: dest.parent.mkdir(parents=True, exist_ok=True), dest.parent)
+        for attempt in range(1, _ATTEMPTS + 1):
             try:
                 _download_one(session, url, part, size, done, total, report, cancel)
                 break
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if status not in _RETRY_STATUS or attempt == _ATTEMPTS:
+                    raise UserError("err_network", detail=f"HTTP {status}") from exc
             except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
-                if attempt == 3:
+                if attempt == _ATTEMPTS:
                     raise UserError("err_network", detail=str(exc)) from exc
-                time.sleep(2 * (attempt + 1))
+            except requests.RequestException as exc:  # e.g. too many redirects: retrying won't help
+                raise UserError("err_network", detail=str(exc)) from exc
+            except OSError as exc:  # after the requests errors, which are OSErrors too
+                raise UserError("err_write", path=str(exc.filename or part)) from exc
+            _wait(_RETRY_DELAY_S * attempt, cancel)
         if size > 0 and part.stat().st_size != size:
             raise UserError("err_download_incomplete", file=dest.name)
-        os.replace(part, dest)
+        _write_step(lambda: os.replace(part, dest), dest)
         done += max(size, 0)
         report(done, total)
+
+
+def _write_step(step: Callable[[], object], path: Path) -> None:
+    try:
+        step()
+    except OSError as exc:
+        raise UserError("err_write", path=str(exc.filename or path)) from exc
+
+
+def _wait(seconds: float, cancel: threading.Event | None) -> None:
+    """Sleep that Stop interrupts."""
+    if cancel is None:
+        time.sleep(seconds)
+    elif cancel.wait(seconds):
+        raise Cancelled()
 
 
 def _download_one(session, url, part: Path, size, done_before, total, report, cancel) -> None:

@@ -189,7 +189,7 @@ Tests:
 ```bat
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1               :: builds dist\LocalScribe\
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" packaging\installer.iss   :: setup.exe + .bin parts
-.venv\Scripts\python.exe packaging\make_zip.py                             :: or a portable ZIP
+.venv\Scripts\python.exe packaging\make_zip.py [dist]                      :: or a portable ZIP
 ```
 
 Optional extras, for internal (non-public) builds only: `LOCALSCRIBE_BUNDLE_PYANNOTE=1` bundles the pyannote model, and `LOCALSCRIBE_BUNDLE_WHISPER=large-v3,small` bundles Whisper models for computers without internet.

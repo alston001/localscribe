@@ -20,7 +20,7 @@ MEDIA_EXTENSIONS = {
     ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif", ".aifc", ".amr",
     ".qta", ".caf", ".m4b", ".mka", ".ac3", ".mp2",  # .qta: iPhone Voice Memos (iOS 18.2+)
     ".mp4", ".m4v", ".mov", ".mkv", ".avi", ".wmv", ".webm", ".flv", ".mpg", ".mpeg", ".3gp", ".3g2",
-    ".mts", ".m2ts", ".ts", ".vob", ".asf", ".ogv", ".dv",
+    ".mts", ".m2ts", ".vob", ".asf", ".ogv", ".dv",
 }
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -12,6 +14,8 @@ from .core.diarization import SpeakerCount
 from .core.pipeline import EngineSettings, JobOptions
 from .export import FORMATS
 from .export.common import ExportOptions
+
+log = logging.getLogger("localscribe")
 
 # Scenario presets fill in the speaker count and audio clean-up. Keep caps generous: on a
 # real class with 7 voices, capping pyannote at 5 split the lecturer into two speakers.
@@ -61,17 +65,33 @@ class Settings:
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
+        path = Path(path or paths.settings_path())
         try:
-            data = json.loads(Path(path or paths.settings_path()).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return cls()  # first start
+        try:
+            data = json.loads(text)
+            if not isinstance(data, dict):
+                raise ValueError(f"expected an object, got {type(data).__name__}")
+        except ValueError as exc:
+            backup = path.with_name(path.name + ".bad")
+            try:
+                shutil.copyfile(path, backup)
+            except OSError:
+                backup = None
+            log.warning("Ignoring unreadable settings file %s (%s); saved a copy as %s",
+                        path.name, exc, backup.name if backup else "nothing")
             return cls()
         defaults = cls()
         clean = {}
         for f in fields(cls):
-            if f.name in data and isinstance(data[f.name], type(getattr(defaults, f.name))):
-                clean[f.name] = data[f.name]
+            value, wanted = data.get(f.name), type(getattr(defaults, f.name))
+            # bool is an int subclass: "speakers_exact": true must not count as a number.
+            if isinstance(value, wanted) and (wanted is bool or not isinstance(value, bool)):
+                clean[f.name] = value
         settings = cls(**clean)
-        settings.formats = [f for f in settings.formats if f in FORMATS]
+        settings.formats = [f for f in settings.formats if isinstance(f, str) and f in FORMATS]
         if settings.preset not in PRESET_ORDER:
             settings.preset = "custom"
         if settings.preset in PRESETS:

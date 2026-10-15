@@ -8,10 +8,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
-                               QWidget)
+                               QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QVBoxLayout, QWidget)
 
-from .. import i18n
+from .. import APP_NAME, i18n
 from ..config import WHISPER_CHOICES, Settings
 from ..core.models import PYANNOTE_PAGE, ModelStore
 from ..i18n import tr
@@ -176,7 +176,9 @@ class SettingsDialog(QDialog):
     def reject(self) -> None:
         if self.download is not None:
             self.download.cancel.set()
-            self.download.wait(5000)
+            if not self.download.wait(5000):  # closing now would destroy a running thread
+                QMessageBox.information(self, APP_NAME, tr("still_stopping"))
+                return
         super().reject()
 
     def accept(self) -> None:

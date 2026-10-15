@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 from ..core.errors import UserError
@@ -35,19 +38,33 @@ def output_base(folder: Path, stem: str, formats: list[str]) -> str:
 
 def write_outputs(transcript: Transcript, folder: Path, formats: list[str],
                   options: ExportOptions) -> list[Path]:
-    """Writes <name>_transcript.json plus each requested format. JSON comes first."""
+    """Writes <name>_transcript.json plus each requested format. JSON comes first.
+
+    All files are written into a temporary folder next to them first and moved into place
+    only when every one succeeded, so a full disk or a locked file never leaves half a set.
+    """
     folder = Path(folder)
+    moved: list[Path] = []
+    staging: Path | None = None
     try:
         folder.mkdir(parents=True, exist_ok=True)
         base = output_base(folder, Path(transcript.source).stem, formats)
-        json_path = folder / f"{base}.json"
-        transcript.save(json_path)
-        written = [json_path]
-        for fmt in formats:
-            ext, writer = FORMATS[fmt]
-            target = folder / f"{base}{ext}"
-            writer(transcript, target, options)
-            written.append(target)
-    except PermissionError as exc:
-        raise UserError("err_write", path=str(exc.filename or folder)) from exc
-    return written
+        staging = Path(tempfile.mkdtemp(prefix=".localscribe-", dir=folder))
+        names = [f"{base}.json"] + [f"{base}{FORMATS[fmt][0]}" for fmt in formats]
+        transcript.save(staging / names[0])
+        for fmt, name in zip(formats, names[1:]):
+            FORMATS[fmt][1](transcript, staging / name, options)
+        for name in names:
+            os.replace(staging / name, folder / name)
+            moved.append(folder / name)
+    except OSError as exc:
+        for path in moved:  # this call's files only; earlier results are never touched
+            path.unlink(missing_ok=True)
+        failed = Path(exc.filename) if exc.filename else folder
+        if staging is not None and failed.parent == staging:
+            failed = folder / failed.name  # name the real target, not the temporary copy
+        raise UserError("err_write", path=str(failed)) from exc
+    finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+    return moved

@@ -119,6 +119,7 @@ STRINGS: dict[str, tuple[str, str]] = {
     "no_formats": ("請至少勾選一種輸出格式。", "Choose at least one output format."),
     "no_folder": ("請選擇儲存的資料夾。", "Choose a folder to save to."),
     "all_done": ("全部完成：{ok} 個成功，{bad} 個失敗。", "Finished: {ok} succeeded, {bad} failed."),
+    "still_stopping": ("仍在停止目前的工作，請稍候再關閉。", "Still stopping the current work. Try closing again in a moment."),
     "confirm_quit": ("正在轉換中。關閉程式會中斷目前的工作，確定要關閉嗎？",
                      "A conversion is running. Closing will stop it. Close anyway?"),
     "error_title": ("發生錯誤", "Something went wrong"),

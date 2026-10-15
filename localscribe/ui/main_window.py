@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
         self.run_template: Task | None = None  # options captured when Start was pressed
         self.run_results = {"ok": 0, "bad": 0}
         self._helpers: list = []  # keeps short-lived probe threads alive
+        self._closing = False  # Quit was confirmed; the worker is stopping
         self.model = JobTableModel(self)
         self._build()
         self._load_settings()
@@ -603,15 +604,19 @@ class MainWindow(QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
-        if self.worker is not None:
+        if self.worker is not None and not self._closing:
             answer = QMessageBox.question(self, APP_NAME, tr("confirm_quit"))
             if answer != QMessageBox.Yes:
                 event.ignore()
                 return
+            self._closing = True
             self.worker.cancel.set()
-            self.worker.wait(15000)
-        for helper in list(self._helpers):  # e.g. the hardware probe still importing torch
-            helper.wait(15000)
+        # Destroying a QThread that is still running crashes the app: wait, or stay open.
+        threads = ([self.worker] if self.worker is not None else []) + list(self._helpers)
+        if not all(thread.wait(15000) for thread in threads):  # e.g. the probe still importing torch
+            QMessageBox.information(self, APP_NAME, tr("still_stopping"))
+            event.ignore()
+            return
         self.settings.geometry = bytes(self.saveGeometry().toHex()).decode()
         self._save_settings()
         event.accept()

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import faulthandler
+import io
 import logging
 import os
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -12,7 +15,7 @@ from ..core import device as dev
 
 dev.prepare_environment()  # before any torch / pyannote import
 
-from PySide6.QtCore import QObject, Signal  # noqa: E402
+from PySide6.QtCore import QObject, Signal, Slot  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from .. import APP_NAME, __version__, i18n, paths  # noqa: E402
@@ -50,21 +53,59 @@ def _setup_logging(bridge: _LogBridge) -> None:
     log.info("%s %s starting", APP_NAME, __version__)
 
 
+class _ErrorBridge(QObject):
+    """Shows crash messages on the GUI thread, whichever thread the exception happened in."""
+
+    error = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.error.connect(self._show)  # queued when emitted from a worker thread
+
+    @Slot(str)
+    def _show(self, message: str) -> None:
+        QMessageBox.critical(None, APP_NAME, message)
+
+
+_errors: _ErrorBridge | None = None
+_console = None  # console.log, kept open for faulthandler
+
+
 def _redirect_missing_streams() -> None:
+    global _console
     # A windowed build has no console; libraries that write to stderr would crash.
     if sys.stdout is None or sys.stderr is None:
-        sink = open(paths.user_data_dir() / "console.log", "a", encoding="utf-8", buffering=1)
-        sys.stdout = sys.stdout or sink
-        sys.stderr = sys.stderr or sink
+        try:
+            _console = open(paths.user_data_dir() / "console.log", "a", encoding="utf-8", buffering=1)
+        except OSError:  # unwritable data folder: still must not crash
+            _console = open(os.devnull, "w", encoding="utf-8")
+        sys.stdout = sys.stdout or _console
+        sys.stderr = sys.stderr or _console
+    # Native crashes (CUDA drivers, Qt) skip Python's handlers; this still records their stack.
+    try:
+        faulthandler.enable(sys.stderr)
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+        pass  # a stream without a file descriptor
 
 
 def _excepthook(kind, value, tb) -> None:
     log.error("Unhandled error", exc_info=(kind, value, tb))
-    if QApplication.instance() is not None:
-        QMessageBox.critical(None, APP_NAME, i18n.tr("err_unexpected", detail=f"{kind.__name__}: {value}"))
+    if _errors is not None:
+        _errors.error.emit(i18n.tr("err_unexpected", detail=f"{kind.__name__}: {value}"))
+
+
+def _thread_excepthook(args) -> None:
+    if args.exc_type is not SystemExit:
+        _excepthook(args.exc_type, args.exc_value, args.exc_traceback)
+
+
+def _install_error_hooks() -> None:
+    sys.excepthook = _excepthook
+    threading.excepthook = _thread_excepthook
 
 
 def main() -> int:
+    global _errors
     _redirect_missing_streams()
     if len(sys.argv) > 1 and sys.argv[1] == "--cli":  # command line inside the packaged app
         from ..cli import main as cli_main
@@ -85,7 +126,8 @@ def main() -> int:
 
     bridge = _LogBridge()
     _setup_logging(bridge)
-    sys.excepthook = _excepthook
+    _errors = _ErrorBridge()
+    _install_error_hooks()
 
     settings = Settings.load()
     if not settings.ui_language:

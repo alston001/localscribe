@@ -178,6 +178,7 @@ class ConvertDialog(QDialog):
         self.worker.file_progress.connect(self._on_progress)
         self.worker.file_done.connect(self._on_done)
         self.worker.file_failed.connect(self._on_failed)
+        self.worker.file_stopped.connect(self._on_stopped)
         self.worker.finished.connect(self._on_finished)
         self.worker.start()
         self._update_state()
@@ -208,14 +209,33 @@ class ConvertDialog(QDialog):
         self.completed += 1
         self.counts["bad"] += 1
 
+    def _on_stopped(self, row: int) -> None:
+        item = self.list.item(row)
+        item.setIcon(self.style().standardIcon(QStyle.SP_BrowserStop))
+        item.setText(f"{Path(item.data(_PATH)).name}  —  {tr('st_stopped')}")
+
     def _on_finished(self) -> None:
         self.worker = None
         self.progress.setValue(int(self.completed / max(self.total_files, 1) * 1000))
         self.lbl_status.setText(tr("convert_done", ok=self.counts["ok"], bad=self.counts["bad"]))
         self._update_state()
 
+    def _stop_worker(self) -> bool:
+        """Cancels a running conversion. False while it is still running after the wait."""
+        if self.worker is None:
+            return True
+        self.worker.cancel.set()
+        if self.worker.wait(10000):
+            return True
+        self.lbl_status.setText(tr("still_stopping"))
+        return False
+
+    def reject(self) -> None:  # Esc
+        if self._stop_worker():
+            super().reject()
+
     def closeEvent(self, event) -> None:
-        if self.worker is not None:
-            self.worker.cancel.set()
-            self.worker.wait(10000)
-        super().closeEvent(event)
+        if self._stop_worker():
+            super().closeEvent(event)
+        else:
+            event.ignore()

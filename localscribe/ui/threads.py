@@ -47,7 +47,11 @@ class DurationProbe(QThread):
 
     def run(self) -> None:
         for job_id, path in self.items:
-            seconds = probe_duration(path)
+            try:
+                seconds = probe_duration(path)
+            except Exception:
+                log.warning("Could not read the length of %s", path.name, exc_info=True)
+                continue
             if seconds:
                 self.found.emit(job_id, seconds)
 
@@ -125,6 +129,7 @@ class ConvertThread(QThread):
     file_progress = Signal(int, float)
     file_done = Signal(int, str)
     file_failed = Signal(int, str)
+    file_stopped = Signal(int)
 
     def __init__(self, items: list[tuple[int, Path]], folder: Path | None, fmt: str, parent=None):
         super().__init__(parent)
@@ -144,6 +149,7 @@ class ConvertThread(QThread):
                 log.info("Converted %s -> %s", path.name, out)
                 self.file_done.emit(row, str(out))
             except Cancelled:
+                self.file_stopped.emit(row)
                 break
             except UserError as exc:
                 self.file_failed.emit(row, tr(exc.key, **exc.kwargs))
