@@ -1,5 +1,67 @@
 # Changelog
 
+## Unreleased
+
+Changes since 0.1.1, from a code review and a round of hands-on testing.
+
+### Problems are reported instead of hidden
+
+- **Warnings on finished files.** When a file finishes but the result may be worse than usual, LocalScribe now says so. The queue shows "Done (1 warning(s))" (hover for details), and the warning also goes to the log, the command-line output and `_transcript.json`. Cases covered:
+  - a damaged or cut-off recording, where only part of the audio could be read;
+  - the GPU failing, so the file ran on the CPU instead (later files in the same session are marked too);
+  - Settings asking for the GPU when no usable NVIDIA GPU is found;
+  - no speakers could be told apart, or fewer speakers were found than you asked for.
+- **Cut-off recordings are caught.** A recording that stops early, such as a copy that didn't finish, used to be transcribed as if it were complete, because ffmpeg reads such files without an error. LocalScribe now compares the length it read with the length the file claims. The audio converter does the same and marks the row.
+- **No speech is an error.** A file in which no speech is found now fails with a clear message instead of producing an empty transcript.
+- **A GPU failure keeps the model.** If the GPU fails, transcription and speaker identification continue on the CPU with the Whisper model the GPU would have used: slower, but just as accurate. Before, "Automatic" switched to the small model, and a GPU failure while loading pyannote stopped the file. When Settings explicitly asks for the GPU, a GPU failure now stops the file with an error for speaker identification too, instead of quietly switching to the CPU.
+- If hardware detection fails, the status bar no longer stays at "Detecting hardware…".
+
+### Transcripts
+
+- **Ready for a proofreading editor.** Loading a `_transcript.json` from a newer LocalScribe fails with a clear message instead of silently losing data, and unknown fields are ignored. Saving goes through a temporary file, so a failed save never destroys the previous one.
+- **Edited text wins.** If a segment's text no longer matches its word timings, for example after it was corrected, subtitles and spreadsheets use the corrected text.
+- **The punctuation hint is English-only.** Fast mode nudges Whisper to keep punctuation with an English example sentence. It is now used only when the language is set to English, not on auto-detect, where it could bias the result toward English.
+
+### Stability
+
+- **Safe closing.** Closing the main window, Settings or the converter while work is running now waits for the work to stop. If that takes too long, the window says so and stays open instead of crashing.
+- **Esc in the converter** stops the conversion like Cancel and keeps the dialog open, with the row marked "Stopped".
+- **Crash reports.** Unexpected errors in background work are logged and shown in a message box. Native crashes are written to `%LOCALAPPDATA%\LocalScribe\console.log`, or to the console when there is one.
+- **No half-written exports.** Output files are written to a temporary folder and moved into place only after all of them succeed. A full disk or a locked file reports which file failed and leaves nothing behind.
+- **Model downloads** retry when the server is busy (HTTP 429 or 5xx), Stop works during the wait, and network and disk problems show a clear message.
+- **A damaged `settings.json`** is kept as `settings.json.bad`, and the defaults are used.
+- A file whose length can't be read no longer stops the files after it from showing their lengths.
+- On the command line, `--speakers` rejects values such as `2-`, `3-1` or `0` with a clear message.
+- `.ts` files are no longer treated as media, because that is also the extension of TypeScript source files.
+- The quit confirmation now says a transcription, not a conversion, is running.
+
+### Privacy and security
+
+- **No folder names in outputs.** `_transcript.json` and the Excel export store the recording's file name only, because folder names (a client's, a course's) can identify people. Log lines name files, not folders; the technical details of an unexpected error can still include a path (see README › Privacy).
+- **Downloads are checked.** Large Hugging Face files are verified against their SHA-256. A file listed with a path outside the model folder is refused. A Hugging Face token is only sent over https, which matters if you set `HF_ENDPOINT`. sherpa-onnx files whose size the server doesn't report are refused, because a cut-off download would look complete.
+- **ffmpeg reads local files only.** A crafted playlist or media file can't make it open network addresses, and text in a file's tags, such as its title, can no longer fake its length or audio streams.
+- **No formulas in spreadsheets.** CSV and Excel cells that start with `=`, `+`, `-`, `@` or a tab get a leading apostrophe, so Excel shows them as text instead of running them.
+- Explorer is started by its full Windows path.
+
+### For developers
+
+- `packaging\make_zip.py [dist folder]` takes the build folder (for example `dist_build`) and checks that `LocalScribe.exe` is in it.
+- `.gitignore` covers recordings and transcripts in every folder, not just the project root, plus partial downloads, logs and `.env`.
+- The test suite grew from 20 to 125 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
+
+### 中文摘要
+
+以下是 0.1.1 之後的變更，來自程式碼審查與實機測試，尚未發佈。
+
+- **問題會提醒你，不再默默發生**：檔案完成但結果可能較差時，工作清單會顯示「完成（N 項提醒）」，滑鼠停上去可看細節，記錄檔、命令列輸出和 `_transcript.json` 也會記下。涵蓋：檔案損毀或被截斷、顯示卡失敗改用 CPU、設定指定顯示卡卻找不到、分不出說話人或人數少於指定。
+- **截斷的錄音會被發現**：中途中斷或沒複製完整的檔案，以前會被當成完整的來轉錄；現在會比對實際讀到的長度。轉檔工具也會檢查並標示。
+- **沒有語音時直接報錯**，不再產生空白逐字稿。
+- **顯示卡失敗時沿用同一個模型**，改用 CPU 繼續，較慢但一樣準確。以前「自動」會換成 small 模型，載入 pyannote 時顯示卡失敗也會讓檔案失敗。設定明確指定顯示卡時，失敗會直接報錯，不會偷偷改用 CPU。
+- **逐字稿**：`_transcript.json` 可供日後的校對編輯器使用：較新版本的檔案會明確拒絕而不是遺失資料，存檔失敗不會毀掉舊檔。文字修改過後，字幕和試算表以修改後的文字為準。快速模式的英文標點提示只在語言設為英文時使用。
+- **穩定性**：工作執行中關閉視窗會先等它停止，太久會提示並保持開啟，不再當掉。轉檔時按 Esc 等於「取消」，視窗保留並顯示「已停止」。背景錯誤會記錄並跳出提示。輸出檔全部寫完才放到目的地，失敗不留半成品。模型下載遇到伺服器忙碌會重試。損毀的 `settings.json` 會備份成 `settings.json.bad`。`--speakers` 會拒絕 `2-`、`3-1`、`0` 這類值。`.ts` 不再被當成媒體檔。關閉提示改為「正在轉錄中」。
+- **隱私與安全**：`_transcript.json` 和 Excel 只記錄檔名，不記錄資料夾；記錄檔也只寫檔名。下載的模型會核對 SHA-256，token 只透過 https 傳送。ffmpeg 只讀本機檔案，檔案標籤無法偽造長度。CSV 與 Excel 中以 `=`、`+`、`-`、`@` 開頭的內容會加上 `'`，不會被當成公式執行。
+- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 125 個。
+
 ## 0.1.1
 
 Tested on a real 78-minute classroom recording (iPhone Voice Memos, several speakers).
