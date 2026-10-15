@@ -11,6 +11,7 @@ from .diarization import Turn
 
 DEFAULT_SPEAKER = "SPEAKER_00"
 _SENTENCE_END = (".", "?", "!", "…", "。", "？", "！")
+_CLAUSE_MARK = (",", ";", ":", "-", "–", "—", "，", "、", "；", "：")
 _SPACES = re.compile(r"\s+")
 
 
@@ -81,12 +82,25 @@ def _runs(labels: list[str], start: int, end: int):
             run_start = k
 
 
+def _no_break(prev: Word, word: Word) -> bool:
+    """True if nothing separates two words: they touch (Whisper gives such words one
+    shared boundary) and no comma or other mark stands between them."""
+    return word.start - prev.end <= 0.01 \
+        and not prev.text.rstrip().rstrip("\"'”’)]").endswith(_CLAUSE_MARK)
+
+
 def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
                     max_words: int = 2, max_duration: float = 1.0,
                     majority: float = 0.7, pause: float = 0.3) -> list[str]:
     """Fix boundary jitter: Whisper timestamps are ~0.1-0.3 s off and diarization turns
     start or end a little late or early, so the first or last words of a sentence often
-    land in the neighbouring speaker's turn."""
+    land in the neighbouring speaker's turn.
+
+    Up to max_words words move at a time. In the sentence-majority pass they span at most
+    max_duration seconds; in the sentence-edge pass they hold at most that long inside
+    their speaker's turns, and a silence over `pause` seconds ends a stretch the way a
+    sentence end does.
+    """
     given, labels = labels, list(labels)
     spans = sentence_spans(words)
     for s, e in spans:
@@ -104,27 +118,29 @@ def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
                 labels[rs:re_] = [major] * (re_ - rs)
 
     def held(k: int) -> float:
-        """Seconds of word k inside its current speaker's turns (an upper bound if relabelled)."""
+        """Seconds of word k inside its current speaker's turns. For a word the first pass
+        relabelled, the part outside its old speaker's turns stands in."""
         part = coverage[k] if labels[k] == given[k] else 1.0 - coverage[k]
         return part * max(words[k].end - words[k].start, 0.02)
 
-    # A sentence, or a stretch between pauses (longer than Whisper leaves inside fluent
-    # speech), split one or two words from its start or end goes whole to the speaker of
-    # the rest, with no majority needed, so the change lands at the sentence end or pause
-    # instead of "Give / me an example". If both parts are that short, the one with less
-    # time in its speaker's turns follows the other. Edge words that sit in their
-    # speaker's turn for over max_duration seconds are a real change and stay.
+    # Sentence-edge pass: a sentence, or a stretch between pauses, split one or two words
+    # from its start or end goes whole to the speaker of the rest, with no majority needed,
+    # so the change lands at the sentence end or pause instead of "Give / me an example".
+    # Only a change inside fluent speech moves: a reply after a silence or a comma
+    # ("you know, / Right.") stays. The part that moves may hold at most 1.5 times as long
+    # in its speaker's turns as the other part, since turn edges run late or early; if
+    # both parts qualify, the one holding less moves.
     for s, e in sentence_spans(words, pause):
         runs = list(_runs(labels, s, e))
-        if len(runs) != 2:
+        if len(runs) != 2 or not _no_break(words[runs[1][0] - 1], words[runs[1][0]]):
             continue
         seconds = [sum(held(k) for k in range(rs, re_)) for rs, re_ in runs]
-        short = [re_ - rs <= max_words and sec <= max_duration for (rs, re_), sec in zip(runs, seconds)]
-        if not any(short):
-            continue
-        moved = seconds.index(min(seconds)) if all(short) else short.index(True)
-        rs, re_ = runs[moved]
-        labels[rs:re_] = [labels[runs[1 - moved][0]]] * (re_ - rs)
+        movable = [i for i, (rs, re_) in enumerate(runs) if re_ - rs <= max_words
+                   and seconds[i] <= min(max_duration, 1.5 * seconds[1 - i])]
+        if movable:
+            moved = min(movable, key=lambda i: seconds[i])
+            rs, re_ = runs[moved]
+            labels[rs:re_] = [labels[runs[1 - moved][0]]] * (re_ - rs)
 
     # A lone weakly-covered word between two words of the same speaker joins them,
     # unless it is a whole sentence on its own ("Yes.").

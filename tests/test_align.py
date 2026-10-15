@@ -95,6 +95,45 @@ def test_words_stretched_over_a_lost_interjection_rejoin_their_sentence():
     assert smooth_speakers(ws, labels, coverage) == ["A"] * 9
 
 
+def test_short_sentence_split_goes_to_the_part_with_more_time():
+    # B's turn starts inside "agree."; A holds more of "I agree.", so "agree." follows.
+    ws = words([(0.0, 0.3, " I"), (0.3, 0.6, " agree."), (1.0, 1.3, " Good.")])
+    turns = [Turn(0.0, 0.42, "A"), Turn(0.42, 1.5, "B")]
+    labels, coverage = assign_speakers(ws, turns)
+    assert labels == ["A", "B", "B"]
+    assert smooth_speakers(ws, labels, coverage) == ["A", "A", "B"]
+
+
+def test_reply_after_a_silence_is_kept_without_punctuation():
+    # Whisper left out the "?", but "Yes." starts after a gap: a real reply.
+    ws = words([(0.0, 0.3, " Is"), (0.3, 0.6, " that"), (0.6, 0.9, " right"), (1.0, 1.4, " Yes.")])
+    turns = [Turn(0.0, 0.95, "A"), Turn(0.95, 1.6, "B")]
+    labels, coverage = assign_speakers(ws, turns)
+    assert smooth_speakers(ws, labels, coverage) == ["A", "A", "A", "B"]
+
+
+def test_reply_after_a_comma_is_kept():
+    ws = words([(0.0, 0.3, " you"), (0.3, 0.6, " know,"), (0.6, 1.1, " Right.")])
+    turns = [Turn(0.0, 0.6, "A"), Turn(0.6, 1.5, "B")]
+    labels, coverage = assign_speakers(ws, turns)
+    assert smooth_speakers(ws, labels, coverage) == ["A", "A", "B"]
+
+
+def test_short_part_that_holds_clearly_more_time_stays():
+    # A's slow "Right" holds twice as long as B's quick "so I think.".
+    ws = words([(0.0, 0.8, " Right"), (0.8, 0.97, " so"), (0.97, 1.05, " I"), (1.05, 1.2, " think.")])
+    turns = [Turn(0.0, 0.8, "A"), Turn(0.8, 1.5, "B")]
+    labels, coverage = assign_speakers(ws, turns)
+    assert smooth_speakers(ws, labels, coverage) == ["A", "B", "B", "B"]
+
+
+def test_three_speaker_runs_in_one_sentence_are_left_alone():
+    ws = words([(0.0, 0.3, " so"), (0.3, 0.6, " yes"), (0.6, 0.9, " fine.")])
+    turns = [Turn(0.0, 0.3, "A"), Turn(0.3, 0.6, "B"), Turn(0.6, 1.0, "A")]
+    labels, coverage = assign_speakers(ws, turns)
+    assert smooth_speakers(ws, labels, coverage) == ["A", "B", "A"]
+
+
 def test_mid_sentence_change_with_strong_evidence_stays():
     # Both sides sit in their own speaker's turn for over a second: not boundary jitter.
     ws = words([(0.0, 0.6, " Well"), (0.6, 1.2, " actually"), (1.2, 1.5, " we"), (1.5, 1.8, " can"),
