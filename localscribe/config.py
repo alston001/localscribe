@@ -13,12 +13,13 @@ from .core.pipeline import EngineSettings, JobOptions
 from .export import FORMATS
 from .export.common import ExportOptions
 
-# Scenario presets fill in the speaker count and audio clean-up.
+# Scenario presets fill in the speaker count and audio clean-up. Keep caps generous: on a
+# real class with 7 voices, capping pyannote at 5 split the lecturer into two speakers.
 PRESETS = {
     "interview": {"speaker_mode": "exact", "speakers_exact": 2, "normalize": False, "denoise": False},
-    "focus_group": {"speaker_mode": "range", "speakers_min": 2, "speakers_max": 6, "normalize": True, "denoise": False},
-    "lecture": {"speaker_mode": "range", "speakers_min": 1, "speakers_max": 5, "normalize": True, "denoise": False},
-    "online": {"speaker_mode": "range", "speakers_min": 2, "speakers_max": 8, "normalize": True, "denoise": True},
+    "focus_group": {"speaker_mode": "range", "speakers_min": 2, "speakers_max": 10, "normalize": True, "denoise": False},
+    "lecture": {"speaker_mode": "auto", "normalize": True, "denoise": False},
+    "online": {"speaker_mode": "auto", "normalize": True, "denoise": True},
 }
 PRESET_ORDER = ["interview", "focus_group", "lecture", "online", "custom"]
 
@@ -73,6 +74,11 @@ class Settings:
         settings.formats = [f for f in settings.formats if f in FORMATS]
         if settings.preset not in PRESET_ORDER:
             settings.preset = "custom"
+        if settings.preset in PRESETS:
+            # A preset's values can change between versions (0.1.0's lecture capped at 5
+            # speakers). Hand edits already switch the preset to "custom", so re-apply.
+            for key, value in PRESETS[settings.preset].items():
+                setattr(settings, key, value)
         return settings
 
     def save(self, path: Path | None = None) -> None:

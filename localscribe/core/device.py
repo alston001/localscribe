@@ -11,6 +11,10 @@ from pathlib import Path
 
 def prepare_environment() -> None:
     """Must run before torch / ctranslate2 / pyannote are imported."""
+    import logging
+
+    # "triton not found; flop counting will not work" is printed on every torch import.
+    logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
     # torch and ctranslate2 each ship Intel's OpenMP runtime; loading both is safe here.
     os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
     # pyannote.audio 4 sends usage telemetry by default. Recordings stay private: turn it off.

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
+import warnings
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +19,16 @@ from . import SpeakerCount, Turn
 _STEP_SPANS = {"segmentation": (0.0, 0.3), "embeddings": (0.3, 0.97)}
 
 
+@contextlib.contextmanager
+def _quiet():
+    """pyannote warns about things that don't affect results (TF32 being disabled for
+    reproducibility, std() over one-frame segments, VBx convergence wobble)."""
+    with warnings.catch_warnings():
+        for pattern in ("TensorFloat-32", r"std\(\)", "auxiliary function"):
+            warnings.filterwarnings("ignore", message=f".*{pattern}")
+        yield
+
+
 class PyannoteDiarizer:
     name = "pyannote"
 
@@ -25,11 +37,12 @@ class PyannoteDiarizer:
         import torch
         from pyannote.audio import Pipeline
 
-        pipeline = Pipeline.from_pretrained(str(model_dir))
-        if pipeline is None:
-            raise RuntimeError(f"Could not load pyannote pipeline from {model_dir}")
-        self.device = device
-        self.pipeline = pipeline.to(torch.device(device))
+        with _quiet():
+            pipeline = Pipeline.from_pretrained(str(model_dir))
+            if pipeline is None:
+                raise RuntimeError(f"Could not load pyannote pipeline from {model_dir}")
+            self.device = device
+            self.pipeline = pipeline.to(torch.device(device))
 
     def diarize(self, audio: np.ndarray, count: SpeakerCount,
                 progress: Callable[[float], None] | None = None,
@@ -54,7 +67,7 @@ class PyannoteDiarizer:
                 progress(lo + (hi - lo) * min((completed or 0) / total, 1.0))
 
         waveform = torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32)).unsqueeze(0)
-        with torch.inference_mode():
+        with torch.inference_mode(), _quiet():
             output = self.pipeline({"waveform": waveform, "sample_rate": SAMPLE_RATE},
                                    hook=hook, **kwargs)
         # The exclusive variant keeps one speaker at a time, which is what word alignment needs.

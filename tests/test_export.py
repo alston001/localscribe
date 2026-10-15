@@ -81,3 +81,15 @@ def test_settings_ignore_bad_values(tmp_path):
     assert s.formats == ["docx"] and s.speakers_exact == 2 and s.preset == "custom"
     path.write_text("{not json", encoding="utf-8")
     assert Settings.load(path).formats == ["docx", "txt"]
+
+
+def test_settings_from_older_version_get_current_preset_values(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"preset": "lecture", "speaker_mode": "range", "speakers_min": 1,
+                                "speakers_max": 5}), encoding="utf-8")
+    s = Settings.load(path)
+    assert s.speaker_mode == "auto" and s.speaker_count().max == 0
+    path.write_text(json.dumps({"preset": "custom", "speaker_mode": "range", "speakers_min": 1,
+                                "speakers_max": 5}), encoding="utf-8")
+    custom = Settings.load(path)
+    assert (custom.speaker_mode, custom.speakers_max) == ("range", 5)  # hand-picked values stay
