@@ -9,3 +9,25 @@ packaging/*.ico
 tests/data/*.wav
 tests/data/*.mp4
 tests/data/*.qta
+
+# Personal recordings and transcripts dropped into the project folder for testing
+/test_results/
+/*.m4a
+/*.mp3
+/*.wav
+/*.mp4
+/*.mov
+/*.qta
+/*.aac
+/*.flac
+/*.docx
+/*.xlsx
+/*.csv
+/*.srt
+/*.vtt
+/*.json
+/*.md
+!/README.md
+!/THIRD_PARTY_NOTICES.md
+/*.txt
+!/requirements.txt
