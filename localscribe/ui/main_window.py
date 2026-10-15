@@ -506,10 +506,10 @@ class MainWindow(QMainWindow):
             job.stage, job.progress, job.detail = stage, overall, detail
             self.model.refresh(job_id)
 
-    def _on_job_finished(self, job_id: int, outputs: list) -> None:
+    def _on_job_finished(self, job_id: int, outputs: list, warnings: list) -> None:
         _, job = self.model.find(job_id)
         if job:
-            job.status, job.progress, job.outputs = "done", 1.0, outputs
+            job.status, job.progress, job.outputs, job.warnings = "done", 1.0, outputs, warnings
             self.model.refresh(job_id)
             log.info("Done: %s -> %s", job.path.name, Path(outputs[0]).parent)
         self.run_results["ok"] += 1
@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
         menu.exec(self.view.viewport().mapToGlobal(pos))
 
     def _reset(self, job) -> None:
-        job.status, job.progress, job.error, job.outputs = "waiting", 0.0, "", []
+        job.status, job.progress, job.error, job.outputs, job.warnings = "waiting", 0.0, "", [], []
         self.model.refresh(job.id)
 
     def _open_transcript(self, job) -> None:

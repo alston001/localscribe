@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar
 
 from .. import __version__
 from . import device as dev
@@ -59,6 +59,7 @@ class Progress:
 
 
 ProgressFn = Callable[[Progress], None]
+T = TypeVar("T")
 
 
 class _Reporter:
@@ -82,8 +83,9 @@ class _Reporter:
 
 
 def _is_gpu_failure(exc: Exception) -> bool:
+    # Names from the CUDA stack only: a bare "gpu" also matched unrelated errors.
     text = f"{type(exc).__name__} {exc}".lower()
-    return any(k in text for k in ("cuda", "cublas", "cudnn", "out of memory", "gpu"))
+    return any(k in text for k in ("cuda", "cublas", "cudnn", "out of memory"))
 
 
 def _gb(n: int) -> str:
@@ -111,9 +113,11 @@ class Engine:
     def device(self) -> str:
         return "cpu" if self._gpu_failed else dev.resolve(self.settings.device)
 
-    def whisper_name(self, device: str | None = None) -> str:
+    def whisper_name(self) -> str:
+        # "auto" follows the hardware, not a CPU fallback: losing the GPU should cost speed,
+        # not accuracy.
         name = self.settings.whisper_model
-        return dev.auto_whisper_model(device or self.device()) if name == "auto" else name
+        return dev.auto_whisper_model(dev.resolve(self.settings.device)) if name == "auto" else name
 
     def diarizer_name(self) -> str:
         choice = self.settings.diarizer
@@ -123,7 +127,7 @@ class Engine:
 
     # ---- model management -------------------------------------------------
     def _transcriber_for(self, device: str, report: _Reporter, cancel) -> "object":
-        name = self.whisper_name(device)
+        name = self.whisper_name()
         key = (name, device, str(self.store.root))
         if self._transcriber is not None and self._transcriber_key == key:
             return self._transcriber
@@ -197,11 +201,11 @@ class Engine:
         prompt_hotwords = opts.hotwords.strip() or None
         while True:
             try:
-                report("transcribe", 0.0, self.whisper_name(device))
+                report("transcribe", 0.0, self.whisper_name())
                 return transcriber.transcribe(
                     audio, language=opts.language, batch_size=batch, hotwords=prompt_hotwords,
                     initial_prompt=_PUNCTUATION_PROMPT if batch > 1 and opts.language in (None, "en") else None,
-                    progress=lambda f: report("transcribe", f, self.whisper_name(device)), cancel=cancel)
+                    progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel)
             except Cancelled:
                 raise
             except Exception as exc:
@@ -212,6 +216,21 @@ class Engine:
                     continue
                 raise
 
+    def _run_with_gpu_fallback(self, device: str, step: Callable[[str], T], what: str) -> tuple[T, str]:
+        """step(device), retried once on the CPU when the GPU fails and the user left the
+        device on "auto". Returns the result and the device that produced it."""
+        try:
+            return step(device), device
+        except (Cancelled, UserError):
+            raise
+        except Exception as exc:
+            if device != "cuda" or self.settings.device == "cuda" or not _is_gpu_failure(exc):
+                raise
+            self.log(f"GPU {what} failed ({exc}); continuing on CPU")
+            self._gpu_failed = True
+            self.release_all()
+            return step("cpu"), "cpu"
+
     def transcribe_file(self, path: str | Path, opts: JobOptions, progress: ProgressFn | None = None,
                         cancel: threading.Event | None = None) -> Transcript:
         path = Path(path).resolve()
@@ -221,7 +240,9 @@ class Engine:
 
         report("decode", 0.0)
         started = time.monotonic()
-        audio = load_audio(path, normalize=opts.normalize, denoise=opts.denoise, cancel=cancel)
+        warnings: list[dict] = []
+        audio = load_audio(path, normalize=opts.normalize, denoise=opts.denoise, cancel=cancel,
+                           warnings=warnings)
         duration = len(audio) / SAMPLE_RATE
         timings["decode"] = time.monotonic() - started
         if duration < 0.3:
@@ -230,52 +251,36 @@ class Engine:
 
         device = self.device()
         started = time.monotonic()
-        try:
-            asr = self._asr(audio, opts, device, report, cancel)
-        except (Cancelled, UserError):
-            raise
-        except Exception as exc:
-            if device != "cuda" or self.settings.device == "cuda" or not _is_gpu_failure(exc):
-                raise
-            self.log(f"GPU transcription failed ({exc}); continuing on CPU")
-            self._gpu_failed = True
-            self.release_all()
-            device = "cpu"
-            asr = self._asr(audio, opts, device, report, cancel)
+        asr, device = self._run_with_gpu_fallback(
+            device, lambda on: self._asr(audio, opts, on, report, cancel), "transcription")
         timings["transcribe"] = time.monotonic() - started
         report("transcribe", 1.0)
         if cancel is not None and cancel.is_set():
             raise Cancelled()
+        if not asr.words:
+            raise UserError("err_no_speech")
 
         turns: list[Turn] = []
         diarizer_name = "none"
-        if diarize and asr.words:
+        if diarize:
             diarizer_name = self.diarizer_name()
             diarize_device = device if diarizer_name == "pyannote" else "cpu"
             if diarize_device == "cuda" and dev.detect().vram_gb < 12:
                 self.release_transcriber()  # make room for pyannote on smaller GPUs
             started = time.monotonic()
             report("diarize", 0.0, diarizer_name)
-            diarizer = self._diarizer_for(diarizer_name, diarize_device, report, cancel)
-            diarizer_name = diarizer.name
             if opts.normalize or opts.denoise:
                 # Clean-up filters help recognition but distort voice characteristics
                 # (volume levelling made a 3-person panel cluster as 4), so diarize the original.
                 audio = load_audio(path, cancel=cancel)
-            try:
-                turns = diarizer.diarize(audio, opts.speakers, cancel=cancel,
-                                         progress=lambda f: report("diarize", f, diarizer_name))
-            except (Cancelled, UserError):
-                raise
-            except Exception as exc:
-                if diarize_device != "cuda" or not _is_gpu_failure(exc):
-                    raise
-                self.log(f"GPU diarization failed ({exc}); retrying on CPU")
-                self.release_diarizer()
-                diarize_device = "cpu"
-                diarizer = self._diarizer_for("pyannote", "cpu", report, cancel)
-                turns = diarizer.diarize(audio, opts.speakers, cancel=cancel,
-                                         progress=lambda f: report("diarize", f, diarizer_name))
+
+            def diarize_on(on_device: str) -> tuple[str, list[Turn]]:
+                diarizer = self._diarizer_for(diarizer_name, on_device, report, cancel)
+                return diarizer.name, diarizer.diarize(audio, opts.speakers, cancel=cancel,
+                                                       progress=lambda f: report("diarize", f, diarizer.name))
+
+            (diarizer_name, turns), diarize_device = self._run_with_gpu_fallback(
+                diarize_device, diarize_on, "diarization")
             if diarize_device == "cuda":
                 import torch
 
@@ -283,14 +288,31 @@ class Engine:
             timings["diarize"] = time.monotonic() - started
 
         transcript = build_transcript(path, duration, asr, turns, opts)
+        if self._gpu_failed:
+            warnings.append({"key": "warn_gpu_fallback"})
+        elif self.settings.device == "cuda" and device == "cpu":
+            self.log("Settings ask for the GPU, but no CUDA GPU is available; running on CPU")
+            warnings.append({"key": "warn_cuda_unavailable"})
+        if diarize:
+            warnings += _speaker_warnings(turns, len(transcript.speakers), opts.speakers)
+        transcript.warnings = warnings
         transcript.settings.update({
-            "whisper_model": self.whisper_name(device), "device": device,
+            "whisper_model": self.whisper_name(), "device": device,
             "compute_type": dev.compute_type(device), "fast_mode": self.settings.fast_mode,
             "diarizer": diarizer_name, "timings_s": {k: round(v, 1) for k, v in timings.items()},
         })
         self.log(f"{path.name}: {len(transcript.speakers)} speaker(s), "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in timings.items()))
         return transcript
+
+
+def _speaker_warnings(turns: list[Turn], found: int, count: SpeakerCount) -> list[dict]:
+    if not turns:
+        return [{"key": "warn_no_turns"}]
+    requested = count.exact or count.min
+    if requested and found < requested:
+        return [{"key": "warn_fewer_speakers", "found": found, "requested": requested}]
+    return []
 
 
 def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Turn],

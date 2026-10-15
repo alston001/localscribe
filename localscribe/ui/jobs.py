@@ -27,6 +27,7 @@ class Job:
     outputs: list[str] = field(default_factory=list)
     error: str = ""
     error_details: str = ""
+    warnings: list[str] = field(default_factory=list)  # translated, for finished jobs
 
     @property
     def active(self) -> bool:
@@ -38,6 +39,8 @@ class Job:
             if self.stage == "download" and self.detail:
                 text += f" · {self.detail.split(': ', 1)[-1]}"
             return text
+        if self.status == "done" and self.warnings:
+            return tr("st_done_warn", n=len(self.warnings))
         return tr({"waiting": "st_waiting", "queued": "st_waiting", "done": "st_done",
                    "failed": "st_failed", "stopped": "st_stopped"}[self.status])
 
@@ -80,8 +83,10 @@ class JobTableModel(QAbstractTableModel):
                 return str(job.path)
             if col == 2 and job.error:
                 return job.error
+            if col == 2 and job.warnings:
+                return "\n".join(job.warnings)
         if role == Qt.ForegroundRole and col == 2:
-            key = "running" if job.status == "running" else job.status
+            key = "stopped" if job.status == "done" and job.warnings else job.status
             if key in style.STATUS_COLORS:
                 return QColor(style.STATUS_COLORS[key])
         if role == Qt.TextAlignmentRole and col == 1:

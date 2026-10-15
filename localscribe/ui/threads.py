@@ -19,7 +19,7 @@ from ..core.models import ModelStore
 from ..core.pipeline import Engine, JobOptions
 from ..export import write_outputs
 from ..export.common import ExportOptions
-from ..i18n import tr
+from ..i18n import tr, tr_warning
 
 log = logging.getLogger("localscribe")
 
@@ -34,7 +34,7 @@ class DeviceProbe(QThread):
             info = dev.detect()
         except Exception:
             log.exception("Hardware detection failed")
-            info = None
+            info = dev.DeviceInfo.cpu_only()  # never leave the status bar at "Detecting…"
         self.ready.emit(info)
 
 
@@ -65,7 +65,7 @@ class Task:
 class ProcessThread(QThread):
     job_started = Signal(int)
     job_progress = Signal(int, str, float, str)
-    job_finished = Signal(int, list)
+    job_finished = Signal(int, list, list)  # job id, written paths, translated warnings
     job_failed = Signal(int, str, str)
     job_stopped = Signal(int)
 
@@ -106,7 +106,10 @@ class ProcessThread(QThread):
             self.job_progress.emit(task.job_id, "export", 0.99, "")
             written = write_outputs(transcript, task.output_dir or task.path.parent, task.formats,
                                     task.export_options)
-            self.job_finished.emit(task.job_id, [str(p) for p in written])
+            for warning in transcript.warnings:
+                log.warning("%s: %s", task.path.name, tr_warning(warning))
+            self.job_finished.emit(task.job_id, [str(p) for p in written],
+                                   [tr_warning(w) for w in transcript.warnings])
         except Cancelled:
             self.job_stopped.emit(task.job_id)
         except UserError as exc:

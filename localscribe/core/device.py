@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+log = logging.getLogger("localscribe")
+
 
 def prepare_environment() -> None:
     """Must run before torch / ctranslate2 / pyannote are imported."""
-    import logging
-
     # "triton not found; flop counting will not work" is printed on every torch import.
     logging.getLogger("torch.utils.flop_counter").setLevel(logging.ERROR)
     # torch and ctranslate2 each ship Intel's OpenMP runtime; loading both is safe here.
@@ -30,6 +31,7 @@ def load_cuda_libraries() -> bool:
     try:
         import torch
     except Exception:
+        log.warning("PyTorch could not be loaded; GPU features are off", exc_info=True)
         return False
     lib = Path(torch.__file__).parent / "lib"
     if sys.platform == "win32" and lib.is_dir():
@@ -40,11 +42,17 @@ def load_cuda_libraries() -> bool:
 
 @dataclass(frozen=True)
 class DeviceInfo:
+    """What the status bar shows; cpu_only() is the fallback when detection itself fails."""
+
     cuda: bool
     gpu_name: str
     vram_gb: float
     cpu_name: str
     cpu_threads: int
+
+    @classmethod
+    def cpu_only(cls) -> "DeviceInfo":
+        return cls(False, "", 0.0, "CPU", os.cpu_count() or 4)
 
     def summary(self) -> str:
         if self.cuda:
@@ -69,7 +77,10 @@ def _cpu_name() -> str:
 
 @lru_cache(maxsize=1)
 def detect() -> DeviceInfo:
-    load_cuda_libraries()
+    try:
+        load_cuda_libraries()
+    except Exception:  # e.g. add_dll_directory on a broken install: CTranslate2 may still work
+        log.warning("Setting up the CUDA libraries failed", exc_info=True)
     threads = os.cpu_count() or 4
     gpu_name, vram, cuda = "", 0.0, False
     try:
@@ -77,6 +88,7 @@ def detect() -> DeviceInfo:
 
         cuda = ctranslate2.get_cuda_device_count() > 0
     except Exception:
+        log.warning("CUDA check failed; using the CPU", exc_info=True)
         cuda = False
     if cuda:
         try:
@@ -85,6 +97,7 @@ def detect() -> DeviceInfo:
             props = torch.cuda.get_device_properties(0)
             gpu_name, vram = props.name, props.total_memory / 2**30
         except Exception:
+            log.warning("Could not read the GPU's name and memory", exc_info=True)
             gpu_name = "NVIDIA GPU"
     return DeviceInfo(cuda, gpu_name, vram, _cpu_name(), threads)
 

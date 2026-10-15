@@ -39,6 +39,8 @@ class Transcript:
     settings: dict
     speakers: dict[str, str]  # id -> display name, in order of first appearance
     segments: list[Segment]
+    # Problems that degraded this transcript without stopping it: {"key": i18n key, **format args}
+    warnings: list[dict] = field(default_factory=list)
 
     @property
     def source_name(self) -> str:

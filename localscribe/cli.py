@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
             transcript = engine.transcribe_file(path, opts, progress=show)
             written = write_outputs(transcript, args.output_dir or path.parent, formats, export_options)
             print(f"\r  done in {time.monotonic() - started:.1f}s".ljust(90))
+            for warning in transcript.warnings:
+                print(f"  warning: {i18n.tr_warning(warning)}")
             for w in written:
                 print(f"    {w}")
         except Cancelled:

@@ -58,6 +58,7 @@ STRINGS: dict[str, tuple[str, str]] = {
     "st_diarize": ("分辨說話人", "Identifying speakers"),
     "st_export": ("匯出檔案", "Saving files"),
     "st_done": ("完成", "Done"),
+    "st_done_warn": ("完成（{n} 項提醒）", "Done ({n} warning(s))"),
     "st_failed": ("失敗", "Failed"),
     "st_stopped": ("已停止", "Stopped"),
     # options panel
@@ -185,12 +186,22 @@ STRINGS: dict[str, tuple[str, str]] = {
     "err_unknown_model": ("未知的模型：{name}", "Unknown model: {name}"),
     "err_decode": ("無法讀取這個檔案：{detail}", "Could not read this file: {detail}"),
     "err_no_audio": ("這個檔案裡沒有可用的音訊。", "This file has no usable audio."),
+    "err_no_speech": ("這個檔案裡沒有辨識到語音。", "No speech was found in this file."),
     "err_pyannote_missing": ("尚未安裝 pyannote 模型。請到「設定」下載，或把引擎改成 sherpa-onnx。",
                              "The pyannote model isn't installed. Download it in Settings or switch the engine to sherpa-onnx."),
     "err_write": ("無法寫入檔案：{path}", "Cannot write the file: {path}"),
     "err_codec": ("這個檔案的音訊編碼（{detail}）無法解碼。", "This file's audio codec ({detail}) can't be decoded."),
     "err_convert": ("轉檔失敗：{detail}", "Conversion failed: {detail}"),
     "err_unexpected": ("發生未預期的錯誤：{detail}", "Unexpected error: {detail}"),
+    # warnings: the file finished, but the result may be worse than usual
+    "warn_partial_decode": ("檔案可能已損毀：只讀到 {decoded}，原本應有 {expected}。",
+                            "The file may be damaged: only {decoded} of {expected} could be read."),
+    "warn_gpu_fallback": ("顯示卡執行失敗，已改用 CPU（較慢）。", "The GPU failed, so this ran on the CPU (slower)."),
+    "warn_cuda_unavailable": ("設定指定使用顯示卡，但找不到可用的 NVIDIA 顯示卡，已改用 CPU。",
+                              "Settings ask for the GPU, but no usable NVIDIA GPU was found, so this ran on the CPU."),
+    "warn_no_turns": ("沒有分辨出說話人，全部標成同一人。", "No speakers could be told apart, so everything is labeled as one speaker."),
+    "warn_fewer_speakers": ("只分辨出 {found} 位說話人，少於指定的 {requested} 位。",
+                            "Only {found} speaker(s) were found, fewer than the {requested} requested."),
     # export headings
     "exp_source": ("原始檔案", "Source file"),
     "exp_date": ("轉錄日期", "Transcribed"),
@@ -231,6 +242,11 @@ def current_language() -> str:
 
 def tr(key: str, **kwargs) -> str:
     return tr_in(_current, key, **kwargs)
+
+
+def tr_warning(warning: dict) -> str:
+    """A transcript warning ({"key": ..., **format args}) in the current language."""
+    return tr(warning["key"], **{k: v for k, v in warning.items() if k != "key"})
 
 
 def tr_in(lang: str, key: str, **kwargs) -> str:

@@ -26,6 +26,7 @@ MEDIA_EXTENSIONS = {
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 _AUDIO_RE = re.compile(r"Stream #\d+:\d+\S*: Audio: (.+)")
+_PARTIAL_TOLERANCE_S = 2.0  # container durations are not sample-exact
 _CHANNEL_WORDS = {"mono": 1, "stereo": 2, "quad": 4, "hexagonal": 6, "octagonal": 8}
 
 
@@ -115,8 +116,15 @@ def audio_filters(normalize: bool, denoise: bool) -> list[str]:
     return filters
 
 
+def _mmss(seconds: float) -> str:
+    seconds = int(round(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
 def load_audio(path: str | Path, normalize: bool = False, denoise: bool = False,
-               cancel: threading.Event | None = None) -> np.ndarray:
+               cancel: threading.Event | None = None, warnings: list[dict] | None = None) -> np.ndarray:
+    """Decoded samples. A file ffmpeg could only partly read is still returned, with a
+    "warn_partial_decode" entry appended to `warnings`."""
     info = probe(path)
     if info.audio and not any(s.decodable for s in info.audio):
         raise UserError("err_codec", detail=info.audio[0].codec.split(" (")[0])
@@ -157,4 +165,11 @@ def load_audio(path: str | Path, normalize: bool = False, denoise: bool = False,
         raise UserError("err_decode", detail=detail[-1] if detail else f"ffmpeg exit {proc.returncode}")
     if usable == 0:
         raise UserError("err_no_audio")
+    decoded = usable / 4 / SAMPLE_RATE
+    # ffmpeg exits non-zero on damaged files but still hands over what it could read. Small
+    # glitches are common and harmless; a missing stretch of audio is not.
+    if (proc.returncode != 0 and warnings is not None and info.duration
+            and decoded < info.duration - _PARTIAL_TOLERANCE_S):
+        warnings.append({"key": "warn_partial_decode", "decoded": _mmss(decoded),
+                         "expected": _mmss(info.duration)})
     return np.frombuffer(data[:usable], dtype=np.float32).copy()
