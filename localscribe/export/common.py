@@ -52,7 +52,11 @@ def metadata(t: Transcript, lang: str) -> list[tuple[str, str]]:
 
 
 def segment_words(seg: Segment) -> list[TWord]:
-    return seg.words or [TWord(seg.start, seg.end, seg.text, 1.0)]
+    """Timed words while they still say what `seg.text` says, else the text as one piece
+    (see the text rule in core.transcript)."""
+    if seg.words and _join(seg.words) == " ".join(seg.text.split()):
+        return seg.words
+    return [TWord(seg.start, seg.end, seg.text, 1.0)]
 
 
 def sentence_rows(t: Transcript) -> list[tuple[float, float, str, str]]:

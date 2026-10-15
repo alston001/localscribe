@@ -189,6 +189,8 @@ STRINGS: dict[str, tuple[str, str]] = {
     "err_no_speech": ("這個檔案裡沒有辨識到語音。", "No speech was found in this file."),
     "err_pyannote_missing": ("尚未安裝 pyannote 模型。請到「設定」下載，或把引擎改成 sherpa-onnx。",
                              "The pyannote model isn't installed. Download it in Settings or switch the engine to sherpa-onnx."),
+    "err_transcript_newer": ("這份逐字稿來自較新版本的 LocalScribe（格式 {version}），請更新程式後再開啟。",
+                             "This transcript comes from a newer LocalScribe (format {version}). Update the app to open it."),
     "err_write": ("無法寫入檔案：{path}", "Cannot write the file: {path}"),
     "err_codec": ("這個檔案的音訊編碼（{detail}）無法解碼。", "This file's audio codec ({detail}) can't be decoded."),
     "err_convert": ("轉檔失敗：{detail}", "Conversion failed: {detail}"),

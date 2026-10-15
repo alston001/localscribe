@@ -1,13 +1,23 @@
 """Transcript data model, saved as <name>_transcript.json next to the exports.
 
 Exporters (and a future proofreading editor) only depend on this structure.
+
+Text rule: `Segment.text` is the truth. `words` add timing and confidence, and are only used
+while their joined text still equals `text` (export.common.segment_words); once `text` is
+edited without updating them, exporters fall back to `text` with the segment's times.
+
+Compatibility: `load` ignores keys it does not know, fills fields added later with their
+defaults, and refuses files from a newer FORMAT_VERSION instead of silently dropping data.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+import os
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+
+from .errors import UserError
 
 FORMAT_VERSION = 1
 
@@ -59,12 +69,28 @@ class Transcript:
         return data
 
     def save(self, path: Path) -> None:
-        Path(path).write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=1), encoding="utf-8")
+        """Written to a temporary file first, so a failed save never destroys the old one."""
+        path = Path(path)
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     @classmethod
     def load(cls, path: Path) -> "Transcript":
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        data.pop("format_version", None)
-        segments = [Segment(**{**s, "words": [TWord(**w) for w in s.get("words", [])]})
-                    for s in data.pop("segments")]
-        return cls(**data, segments=segments)
+        version = data.get("format_version", 1)
+        if not isinstance(version, int) or version > FORMAT_VERSION:
+            raise UserError("err_transcript_newer", version=version)
+        segments = [_known(Segment, {**s, "words": [_known(TWord, w) for w in s.get("words", [])]})
+                    for s in data["segments"]]
+        return _known(cls, {**data, "segments": segments})
+
+
+def _known(cls, data: dict):
+    """cls(**data) without the keys cls doesn't have (written by a newer app or an editor)."""
+    names = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in data.items() if k in names})

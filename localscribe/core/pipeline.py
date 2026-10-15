@@ -204,7 +204,8 @@ class Engine:
                 report("transcribe", 0.0, self.whisper_name())
                 return transcriber.transcribe(
                     audio, language=opts.language, batch_size=batch, hotwords=prompt_hotwords,
-                    initial_prompt=_PUNCTUATION_PROMPT if batch > 1 and opts.language in (None, "en") else None,
+                    # English only: on auto-detect an English prompt pulls other languages to English.
+                    initial_prompt=_PUNCTUATION_PROMPT if batch > 1 and opts.language == "en" else None,
                     progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel)
             except Cancelled:
                 raise

@@ -78,7 +78,7 @@ class Transcriber:
         else:
             clips = speech_clips(audio)
             if not clips:
-                return AsrResult(language or "en", 0.0, [])
+                return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
             # Without conditioning, one misheard phrase cannot snowball into a repetition loop.
             segments, info = self.model.transcribe(
                 audio, vad_filter=False, clip_timestamps=[t for clip in clips for t in clip],
