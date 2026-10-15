@@ -498,7 +498,7 @@ class MainWindow(QMainWindow):
         if job:
             job.status, job.stage, job.progress = "running", "decode", 0.0
             self.model.refresh(job_id)
-            log.info("Started %s", job.path)
+            log.info("Started %s", job.path.name)
         self._update_status_bar()
 
     def _on_job_progress(self, job_id: int, stage: str, overall: float, detail: str) -> None:
@@ -512,7 +512,7 @@ class MainWindow(QMainWindow):
         if job:
             job.status, job.progress, job.outputs, job.warnings = "done", 1.0, outputs, warnings
             self.model.refresh(job_id)
-            log.info("Done: %s -> %s", job.path.name, Path(outputs[0]).parent)
+            log.info("Done: %s", job.path.name)
         self.run_results["ok"] += 1
         self._update_status_bar()
 
@@ -587,7 +587,7 @@ class MainWindow(QMainWindow):
 
     def _open_folder(self, job) -> None:
         target = job.outputs[0] if job.outputs else str(job.path)
-        subprocess.Popen(["explorer", "/select,", os.path.normpath(target)])
+        subprocess.Popen([paths.explorer_exe(), "/select,", os.path.normpath(target)])
 
     def _show_error(self, job) -> None:
         box = QMessageBox(QMessageBox.Warning, tr("error_title"), job.error, parent=self)

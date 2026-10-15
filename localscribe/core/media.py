@@ -24,8 +24,11 @@ MEDIA_EXTENSIONS = {
 }
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
-_AUDIO_RE = re.compile(r"Stream #\d+:\d+\S*: Audio: (.+)")
+# Anchored to the start of a line: a metadata tag such as a title can contain the same text.
+_DURATION_RE = re.compile(r"(?m)^\s*Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+_AUDIO_RE = re.compile(r"(?m)^\s*Stream #\d+:\d+\S*: Audio: (.+)")
+# Put before "-i": a playlist or other crafted file must not make ffmpeg open network URLs.
+LOCAL_INPUT_ONLY = ["-protocol_whitelist", "file,pipe"]
 _PARTIAL_TOLERANCE_S = 2.0  # container durations are not sample-exact
 _CHANNEL_WORDS = {"mono": 1, "stereo": 2, "quad": 4, "hexagonal": 6, "octagonal": 8}
 
@@ -75,7 +78,7 @@ class MediaInfo:
 def probe(path: str | Path) -> MediaInfo:
     """Duration and audio streams from ffmpeg's header dump (fast, no decoding)."""
     try:
-        proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", "-i", str(path)],
+        proc = subprocess.run([ffmpeg_exe(), "-hide_banner", "-nostdin", *LOCAL_INPUT_ONLY, "-i", str(path)],
                               capture_output=True, stdin=subprocess.DEVNULL,
                               creationflags=_NO_WINDOW, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
@@ -129,7 +132,7 @@ def load_audio(path: str | Path, normalize: bool = False, denoise: bool = False,
     if info.audio and not any(s.decodable for s in info.audio):
         raise UserError("err_codec", detail=info.audio[0].codec.split(" (")[0])
     stream = best_audio_stream(info.audio)
-    cmd = [ffmpeg_exe(), "-hide_banner", "-nostdin", "-loglevel", "error", "-i", str(path)]
+    cmd = [ffmpeg_exe(), "-hide_banner", "-nostdin", "-loglevel", "error", *LOCAL_INPUT_ONLY, "-i", str(path)]
     if stream is not None and len(info.audio) > 1:
         cmd += ["-map", f"0:a:{stream.index}"]
     cmd += ["-vn", "-sn", "-dn", "-ac", "1", "-ar", str(SAMPLE_RATE)]

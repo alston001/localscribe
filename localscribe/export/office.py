@@ -94,6 +94,15 @@ def _table_header(lang: str) -> list[str]:
     return ["#", tr_in(lang, "exp_start"), tr_in(lang, "exp_end"), tr_in(lang, "exp_speaker"), tr_in(lang, "exp_text")]
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _cell(text: str) -> str:
+    """Text that Excel shows as text: a leading = + - @ would otherwise start a formula
+    (spoken words can, and a crafted file name could run one)."""
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
 def export_xlsx(t: Transcript, path: Path, options: ExportOptions) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -103,7 +112,7 @@ def export_xlsx(t: Transcript, path: Path, options: ExportOptions) -> None:
     ws.title = tr_in(options.lang, "exp_sheet_transcript")
     ws.append(_table_header(options.lang))
     for i, (start, end, speaker, text) in enumerate(sentence_rows(t), start=1):
-        ws.append([i, clock(start, True), clock(end, True), speaker, text])
+        ws.append([i, clock(start, True), clock(end, True), _cell(speaker), _cell(text)])
     header_fill = PatternFill("solid", fgColor="E5E7EB")
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -119,7 +128,7 @@ def export_xlsx(t: Transcript, path: Path, options: ExportOptions) -> None:
     ws.auto_filter.ref = ws.dimensions
 
     info = wb.create_sheet(tr_in(options.lang, "exp_sheet_info"))
-    info.append([tr_in(options.lang, "exp_source"), t.source])
+    info.append([tr_in(options.lang, "exp_source"), _cell(t.source_name)])
     for key, value in metadata(t, options.lang):
         info.append([key, value])
     info.column_dimensions["A"].width = 16
@@ -135,4 +144,4 @@ def export_csv(t: Transcript, path: Path, options: ExportOptions) -> None:
         writer = csv.writer(fh)
         writer.writerow(_table_header(options.lang))
         for i, (start, end, speaker, text) in enumerate(sentence_rows(t), start=1):
-            writer.writerow([i, clock(start, True), clock(end, True), speaker, text])
+            writer.writerow([i, clock(start, True), clock(end, True), _cell(speaker), _cell(text)])

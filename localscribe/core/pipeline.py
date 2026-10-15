@@ -340,8 +340,9 @@ def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Tu
         segments.append(Segment(speaker=ids[labels[group[0]]], start=ws[0].start, end=ws[-1].end,
                                 text=join_words(ws),
                                 words=[TWord(w.start, w.end, w.text, w.prob) for w in ws]))
+    # Only the file name: folder names (a client's, a course's) can identify people.
     return Transcript(
-        source=str(path), duration=duration, language=asr.language,
+        source=path.name, duration=duration, language=asr.language,
         created=datetime.now().isoformat(timespec="seconds"), app_version=__version__,
         settings={"language_requested": opts.language or "auto",
                   "speakers_requested": {"exact": opts.speakers.exact, "min": opts.speakers.min,

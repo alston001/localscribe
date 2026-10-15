@@ -120,7 +120,7 @@ class ProcessThread(QThread):
             self.job_failed.emit(task.job_id, tr(exc.key, **exc.kwargs), "")
         except Exception as exc:
             details = traceback.format_exc()
-            log.error("%s failed:\n%s", task.path, details)
+            log.error("%s failed:\n%s", task.path.name, details)
             self.job_failed.emit(task.job_id, tr("err_unexpected", detail=f"{type(exc).__name__}: {exc}"), details)
 
 
@@ -146,7 +146,7 @@ class ConvertThread(QThread):
             try:
                 out = convert_file(path, self.folder, self.fmt, cancel=self.cancel,
                                    progress=lambda f, r=row: self.file_progress.emit(r, f))
-                log.info("Converted %s -> %s", path.name, out)
+                log.info("Converted %s -> %s", path.name, Path(out).name)
                 self.file_done.emit(row, str(out))
             except Cancelled:
                 self.file_stopped.emit(row)
@@ -154,7 +154,7 @@ class ConvertThread(QThread):
             except UserError as exc:
                 self.file_failed.emit(row, tr(exc.key, **exc.kwargs))
             except Exception as exc:
-                log.exception("Conversion of %s failed", path)
+                log.exception("Conversion of %s failed", path.name)
                 self.file_failed.emit(row, tr("err_unexpected", detail=f"{type(exc).__name__}: {exc}"))
 
 

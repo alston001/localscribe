@@ -129,7 +129,8 @@ The token is used only for that download and is never stored. Public releases do
 
 - All processing happens locally. The network is used only to download models
 - pyannote.audio 4 sends usage telemetry by default; LocalScribe turns it off (`PYANNOTE_METRICS_ENABLED=false`)
-- The log file `%LOCALAPPDATA%\LocalScribe\localscribe.log` holds file names and timings, never transcript text
+- The log file `%LOCALAPPDATA%\LocalScribe\localscribe.log` holds file names (not folders) and timings, never transcript text. The technical details of an unexpected error can include a file's location, so check them before you share the log
+- `_transcript.json` and the Excel export store the recording's file name, not its folder
 
 ## Troubleshooting
 
@@ -236,4 +237,4 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 
 **準確度**：用一份 78 分鐘的上課錄音測試，和 iPhone 語音備忘錄內建的逐字稿比較（兩邊都不當作標準答案），約 88% 的字一致；不一致的地方，LocalScribe 在專有名詞上通常比較合理。逐字稿務必校對，特別是人名、專有名詞，以及多人同時說話的段落。中文目前可能輸出簡體字。
 
-**疑難排解**：遇到問題時，請參考上方英文的 [Troubleshooting](#troubleshooting) 表格；回報問題時可附上 `%LOCALAPPDATA%\LocalScribe\localscribe.log`。
+**疑難排解**：遇到問題時，請參考上方英文的 [Troubleshooting](#troubleshooting) 表格；回報問題時可附上 `%LOCALAPPDATA%\LocalScribe\localscribe.log`（記錄檔只有檔名與耗時，不含逐字稿內容；但未預期錯誤的技術細節可能含有檔案位置，分享前請先檢查）。

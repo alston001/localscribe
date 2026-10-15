@@ -11,12 +11,13 @@ All models live under one folder so it can be copied to offline machines:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import tarfile
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, NamedTuple
 from urllib.parse import quote
 
 from .. import __version__
@@ -77,6 +78,8 @@ def _session(token: str | None = None):
     session = requests.Session()
     session.headers["User-Agent"] = f"LocalScribe/{__version__}"
     if token:
+        if not HF_ENDPOINT.lower().startswith("https://"):  # HF_ENDPOINT can point at a mirror
+            raise UserError("err_insecure_endpoint", url=HF_ENDPOINT)
         session.headers["Authorization"] = f"Bearer {token}"
     return session
 
@@ -92,8 +95,10 @@ def hf_url(repo: str, path: str, revision: str = "main") -> str:
     return f"{HF_ENDPOINT}/{repo}/resolve/{revision}/{quote(path)}"
 
 
-def hf_list_files(repo: str, token: str | None = None, revision: str = "main") -> list[tuple[str, int]]:
-    """[(path, size)] for every file in a Hugging Face model repo."""
+def hf_list_files(repo: str, token: str | None = None,
+                  revision: str = "main") -> list[tuple[str, int, str | None]]:
+    """[(path, size, sha256 or None)] for every file in a Hugging Face model repo. Large (LFS)
+    files come with their SHA-256; small ones only with a git hash, which isn't checked."""
     import requests
 
     try:
@@ -107,8 +112,9 @@ def hf_list_files(repo: str, token: str | None = None, revision: str = "main") -
     files = []
     for item in resp.json():
         if item.get("type") == "file":
-            size = (item.get("lfs") or {}).get("size") or item.get("size") or 0
-            files.append((item["path"], int(size)))
+            lfs = item.get("lfs") or {}
+            size = lfs.get("size") or item.get("size") or 0
+            files.append((item["path"], int(size), lfs.get("oid")))
     return files
 
 
@@ -125,18 +131,42 @@ class _Throttle:
             self.fn(done, total)
 
 
-def download_files(jobs: list[tuple[str, Path, int]], token: str | None = None,
+class Download(NamedTuple):
+    url: str
+    dest: Path
+    size: int             # bytes; 0 = unknown (only allowed where nothing better exists)
+    sha256: str | None = None
+
+
+def _inside(folder: Path, rel: str) -> Path:
+    """folder / rel, refusing names from a listing that point outside folder."""
+    target = (folder / rel).resolve()
+    if not target.is_relative_to(folder.resolve()):
+        raise UserError("err_unsafe_path", file=rel)
+    return target
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def download_files(jobs: list[tuple], token: str | None = None,
                    progress: ProgressFn | None = None,
                    cancel: threading.Event | None = None) -> None:
-    """Download (url, dest, size) jobs in order. Partial files resume; each file is
-    written to `<dest>.part` and renamed when complete, so `dest` existing means done."""
+    """Download (url, dest, size[, sha256]) jobs in order. Partial files resume; each file is
+    written to `<dest>.part` and renamed when complete and verified, so `dest` existing means done."""
     import requests
 
     session = _session(token)
     report = _Throttle(progress)
-    total = sum(max(size, 0) for _, _, size in jobs)
+    jobs = [Download(*job) for job in jobs]
+    total = sum(max(job.size, 0) for job in jobs)
     done = 0
-    for url, dest, size in jobs:
+    for url, dest, size, sha256 in jobs:
         if dest.exists() and (size <= 0 or dest.stat().st_size == size):
             done += size
             report(done, total)
@@ -161,6 +191,9 @@ def download_files(jobs: list[tuple[str, Path, int]], token: str | None = None,
             _wait(_RETRY_DELAY_S * attempt, cancel)
         if size > 0 and part.stat().st_size != size:
             raise UserError("err_download_incomplete", file=dest.name)
+        if sha256 and _sha256(part) != sha256.lower():
+            part.unlink(missing_ok=True)  # resuming a corrupt file would never fix it
+            raise UserError("err_download_corrupt", file=dest.name)
         _write_step(lambda: os.replace(part, dest), dest)
         done += max(size, 0)
         report(done, total)
@@ -242,9 +275,9 @@ class ModelStore:
         repo = WHISPER_REPOS.get(name)
         if repo is None:
             raise UserError("err_unknown_model", name=name)
-        remote = dict(hf_list_files(repo))
+        remote = {f: (size, sha) for f, size, sha in hf_list_files(repo)}
         dest = self.root / "whisper" / name
-        jobs = [(hf_url(repo, f), dest / f, remote[f]) for f in _WHISPER_FILES if f in remote]
+        jobs = [(hf_url(repo, f), dest / f, *remote[f]) for f in _WHISPER_FILES if f in remote]
         download_files(jobs, progress=progress, cancel=cancel)
         return dest
 
@@ -265,6 +298,9 @@ class ModelStore:
             jobs.append((SHERPA_SEG_URL, archive, _remote_size(SHERPA_SEG_URL)))
         if not self._find(SHERPA_EMB):
             jobs.append((SHERPA_EMB_URL, self.root / SHERPA_EMB, _remote_size(SHERPA_EMB_URL)))
+        for url, _, size in jobs:
+            if size <= 0:  # without a size, a cut-off download would look complete
+                raise UserError("err_size_unknown", file=url.rsplit("/", 1)[-1])
         download_files(jobs, progress=progress, cancel=cancel)
         if archive.exists():
             with tarfile.open(archive, "r:bz2") as tar:
@@ -285,10 +321,10 @@ class ModelStore:
         token = (token or "").strip()
         if not token:
             raise UserError("err_hf_token_missing")
-        files = [(f, s) for f, s in hf_list_files(PYANNOTE_REPO, token)
+        files = [(f, s, sha) for f, s, sha in hf_list_files(PYANNOTE_REPO, token)
                  if not f.endswith((".gif", ".gitattributes"))]
         files.sort(key=lambda fs: fs[0] == "config.yaml")  # config.yaml last: marks completion
         dest = self.root / PYANNOTE_DIR
-        download_files([(hf_url(PYANNOTE_REPO, f), dest / f, s) for f, s in files],
-                       token=token, progress=progress, cancel=cancel)
+        jobs = [(hf_url(PYANNOTE_REPO, f), _inside(dest, f), s, sha) for f, s, sha in files]
+        download_files(jobs, token=token, progress=progress, cancel=cancel)
         return dest

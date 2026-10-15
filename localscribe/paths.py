@@ -26,6 +26,11 @@ def resource_dir() -> Path:
     return project_dir()
 
 
+def explorer_exe() -> str:
+    """Full path, so a planted explorer.exe in the working folder or on PATH is never run."""
+    return os.path.join(os.environ.get("WINDIR") or r"C:\Windows", "explorer.exe")
+
+
 def user_data_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
     path = Path(base) / APP_NAME

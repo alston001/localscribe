@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
                                QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QProgressBar, QPushButton, QRadioButton, QStyle, QVBoxLayout)
 
+from .. import paths
 from ..core.convert import CONVERT_FORMATS
 from ..core.media import MEDIA_EXTENSIONS
 from ..i18n import tr
@@ -135,7 +136,7 @@ class ConvertDialog(QDialog):
 
     def _reveal(self, item: QListWidgetItem) -> None:
         target = item.data(_OUTPUT) or item.data(_PATH)
-        subprocess.Popen(["explorer", "/select,", os.path.normpath(target)])
+        subprocess.Popen([paths.explorer_exe(), "/select,", os.path.normpath(target)])
 
     # ---- running ---------------------------------------------------------
     def _update_state(self) -> None:

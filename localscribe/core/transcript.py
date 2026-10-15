@@ -41,7 +41,7 @@ class Segment:
 
 @dataclass
 class Transcript:
-    source: str
+    source: str  # the recording's file name (files before 0.2 hold a full path; use source_name)
     duration: float
     language: str
     created: str

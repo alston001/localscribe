@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from .errors import Cancelled, UserError
-from .media import _NO_WINDOW, best_audio_stream, ffmpeg_exe, probe
+from .media import _NO_WINDOW, LOCAL_INPUT_ONLY, best_audio_stream, ffmpeg_exe, probe
 
 # id -> (extension, ffmpeg muxer, codec arguments)
 CONVERT_FORMATS = {
@@ -54,7 +54,7 @@ def convert_file(src: str | Path, folder: str | Path | None, fmt: str,
     target = unique_path(out_dir, src.stem, ext)
     partial = target.with_name(target.name + ".part")
 
-    cmd = [ffmpeg_exe(), "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", str(src),
+    cmd = [ffmpeg_exe(), "-hide_banner", "-nostdin", "-loglevel", "error", "-y", *LOCAL_INPUT_ONLY, "-i", str(src),
            "-map", f"0:a:{stream.index}", "-vn", "-map_metadata", "0"]
     if stream.channels > 2:
         cmd += ["-ac", "2"]
