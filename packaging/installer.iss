@@ -1,12 +1,16 @@
 ﻿; Inno Setup 6 script: per-user installer (no administrator rights needed).
 ; 1. Build dist\LocalScribe with packaging\build.ps1
 ; 2. Compile:  "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" packaging\installer.iss
+;    (built elsewhere?  add /DDistDir=..\dist_build\LocalScribe)
 ; The build is ~5 GB, so the installer is split into setup.exe + .bin files; keep them together.
 ; Slices stay under 1.9 GB because GitHub release assets must be smaller than 2 GiB.
 
 #define AppName "LocalScribe"
-#define AppVersion "0.1.0"
+#define AppVersion "0.1.1"
 #define AppExe "LocalScribe.exe"
+#ifndef DistDir
+  #define DistDir "..\dist\LocalScribe"
+#endif
 
 [Setup]
 AppId={{8F3C2A51-6E4B-4D7A-9C1E-2B5F7A9D0E13}
@@ -40,7 +44,7 @@ Name: "chinesetraditional"; MessagesFile: "compiler:Languages\ChineseTraditional
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "..\dist\LocalScribe\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

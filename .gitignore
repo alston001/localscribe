@@ -29,5 +29,7 @@ tests/data/*.qta
 /*.md
 !/README.md
 !/THIRD_PARTY_NOTICES.md
+!/CHANGELOG.md
 /*.txt
 !/requirements.txt
+dist_build/
