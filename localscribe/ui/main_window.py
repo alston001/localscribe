@@ -45,11 +45,8 @@ class MainWindow(QMainWindow):
         self.run_results = {"ok": 0, "bad": 0}
         self._helpers: list = []  # keeps short-lived probe threads alive
         self._closing = False  # Quit was confirmed; the worker is stopping
-        try:
-            self.vocabularies = load_vocabularies()
-        except OSError:  # e.g. locked by another program; editing tries again (_change_vocabularies)
-            log.warning("Could not read the word banks", exc_info=True)
-            self.vocabularies = []
+        self.vocabularies: list[Vocabulary] = []
+        self._reload_vocabularies()
         self.model = JobTableModel(self)
         self._build()
         self._load_settings()
@@ -134,6 +131,7 @@ class MainWindow(QMainWindow):
         self.cmb_vocabulary.new_requested.connect(self._new_vocabulary)
         self.cmb_vocabulary.edit_requested.connect(self._edit_vocabulary)
         self.cmb_vocabulary.delete_requested.connect(self._delete_vocabulary)
+        self.cmb_vocabulary.opening.connect(self._on_vocabulary_menu_opening)
         form.addRow(self.lbl_vocabulary, self.cmb_vocabulary)
 
         self.lbl_speakers = QLabel()
@@ -345,6 +343,18 @@ class MainWindow(QMainWindow):
             self._save_settings()
 
     # ------------------------------------------------------------ word banks
+    def _reload_vocabularies(self) -> None:
+        """Reads the word banks again: another LocalScribe window may have changed them. Keeps
+        this window's list while the file can't be read (e.g. locked by another program)."""
+        try:
+            self.vocabularies = load_vocabularies()
+        except OSError:
+            log.warning("Could not read the word banks", exc_info=True)
+
+    def _on_vocabulary_menu_opening(self) -> None:
+        self._reload_vocabularies()
+        self.cmb_vocabulary.set_vocabularies(self.vocabularies, self.settings.vocabulary)
+
     def _on_vocabulary_picked(self, name: str) -> None:
         self.settings.vocabulary = name
         self._save_settings()
@@ -359,43 +369,50 @@ class MainWindow(QMainWindow):
 
     def _open_vocabulary_editor(self, original: Vocabulary | None, name_hint: str = "") -> None:
         taken = [v.name for v in self.vocabularies if v is not original]
-        dialog = VocabularyEditor(original, taken, self._token_counter(), self.settings.hotwords, name_hint, self)
-        if dialog.exec() == VocabularyEditor.Accepted:
-            self._save_vocabulary(original, dialog.vocabulary())
+        VocabularyEditor(original, taken, self._token_counter(), self.settings.hotwords, name_hint, self,
+                         on_save=lambda result: self._save_vocabulary(original, result)).exec()
 
-    def _save_vocabulary(self, original: Vocabulary | None, result: Vocabulary) -> None:
-        """Adds a new word bank and picks it, or replaces an edited one; a renamed pick stays picked."""
-        if not self._change_vocabularies(original.name if original else "", result):
-            return
+    def _save_vocabulary(self, original: Vocabulary | None, result: Vocabulary) -> str:
+        """Adds a new word bank and picks it, or replaces an edited one; a renamed pick stays picked.
+        Returns why it couldn't be saved, for the editor to show while it stays open; "" when saved."""
+        error = self._change_vocabularies(original.name if original else "", result)
+        if error:
+            return error
         s = self.settings
         if original is None or find_vocabulary([original], s.vocabulary):
             s.vocabulary = result.name
             self._save_settings()
         self.cmb_vocabulary.set_vocabularies(self.vocabularies, s.vocabulary)
+        return ""
 
     def _delete_vocabulary(self, name: str) -> None:
         vocabulary = find_vocabulary(self.vocabularies, name)
         if vocabulary is None or not self._confirm_delete(vocabulary.name):
             return
-        if not self._change_vocabularies(vocabulary.name, None):
+        error = self._change_vocabularies(vocabulary.name, None)
+        if error:
+            QMessageBox.warning(self, APP_NAME, error)
             return
         if find_vocabulary([vocabulary], self.settings.vocabulary):
             self.settings.vocabulary = ""
             self._save_settings()
         self.cmb_vocabulary.set_vocabularies(self.vocabularies, self.settings.vocabulary)
 
-    def _change_vocabularies(self, old_name: str, new: Vocabulary | None) -> bool:
+    def _change_vocabularies(self, old_name: str, new: Vocabulary | None) -> str:
         """Applies one change to the file as it is now, so word banks that another LocalScribe
-        window saved in the meantime survive. False, after saying why, if that fails."""
+        window saved in the meantime survive. Returns why it failed, or "" when saved."""
         try:
-            changed = replace_vocabulary(load_vocabularies(), old_name, new)
+            current = load_vocabularies()
+            clash = find_vocabulary(current, new.name) if new else None
+            if clash is not None and not find_vocabulary([clash], old_name):  # made in another window
+                return tr("vocab_name_taken", name=clash.name)
+            changed = replace_vocabulary(current, old_name, new)
             save_vocabularies(changed)
         except OSError as exc:
-            log.exception("Could not save the word banks")
-            QMessageBox.warning(self, APP_NAME, tr("vocab_save_failed", detail=str(exc)))
-            return False
+            log.warning("Could not save the word banks", exc_info=True)
+            return tr("vocab_save_failed", detail=str(exc))
         self.vocabularies = changed
-        return True
+        return ""
 
     def _confirm_delete(self, name: str) -> bool:
         box = QMessageBox(QMessageBox.Question, APP_NAME, tr("vocab_delete_confirm", name=name), parent=self)
@@ -561,6 +578,7 @@ class MainWindow(QMainWindow):
     def _terms_for_run(self, ask: bool) -> tuple[str, str] | None:
         """(hotwords for Whisper, word bank name). Terms past Whisper's limit are listed first
         instead of being cut off silently; None when the user goes back to shorten the list."""
+        self._reload_vocabularies()
         vocabulary = find_vocabulary(self.vocabularies, self.settings.vocabulary)
         counter = self._token_counter()
         kept, dropped = fit_terms(prompt_terms(vocabulary, self.settings.hotwords), counter)

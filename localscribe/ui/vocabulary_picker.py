@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QLabel,
@@ -235,6 +237,7 @@ class VocabularyPicker(QComboBox):
     new_requested = Signal(str)     # whatever was typed into the search box
     edit_requested = Signal(str)
     delete_requested = Signal(str)
+    opening = Signal()              # before the list is built: a chance to set_vocabularies afresh
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -257,6 +260,7 @@ class VocabularyPicker(QComboBox):
     def showPopup(self) -> None:
         if self._popup is not None:
             return
+        self.opening.emit()
         popup = _Popup(self._entries, self._current, self)
         popup.picked.connect(self._on_picked)
         popup.new_requested.connect(self.new_requested)
@@ -287,13 +291,15 @@ class VocabularyPicker(QComboBox):
 
 
 class VocabularyEditor(QDialog):
-    """A word bank's name and terms, with a live count against Whisper's limit."""
+    """A word bank's name and terms, with a live count against Whisper's limit. `on_save` stores
+    the result and returns why it couldn't ("" when it did); the editor stays open on failure."""
 
     def __init__(self, original: Vocabulary | None, taken: list[str], counter: TokenCounter,
-                 hotwords: str = "", name_hint: str = "", parent=None):
+                 hotwords: str = "", name_hint: str = "", parent=None,
+                 on_save: Callable[[Vocabulary], str] | None = None):
         super().__init__(parent)
         self.taken = {name.casefold(): name for name in taken}
-        self.counter, self.hotwords = counter, hotwords
+        self.counter, self.hotwords, self.on_save = counter, hotwords, on_save
         self.setWindowTitle(tr("vocab_edit_title" if original else "vocab_new_title"))
         self.setMinimumSize(460, 520)
         layout = QVBoxLayout(self)
@@ -357,8 +363,10 @@ class VocabularyEditor(QDialog):
         elif name.casefold() in self.taken:
             error = tr("vocab_name_taken", name=self.taken[name.casefold()])
         else:
-            super().accept()
-            return
+            error = self.on_save(self.vocabulary()) if self.on_save else ""
+            if not error:
+                super().accept()
+                return
         self.lbl_error.setText(error)
         self.lbl_error.show()
         self.txt_name.setFocus()

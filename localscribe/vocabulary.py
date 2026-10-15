@@ -26,9 +26,11 @@ FORMAT_VERSION = 1
 # hotwords and silently drops the rest.
 PROMPT_LIMIT = 223
 # Estimates without the model's tokenizer, from large-v3 and small: 54 real NLP terms joined
-# with ", " took 210 tokens; Chinese terms take about 1.5 tokens a character, plus the comma.
+# with ", " took 210 tokens; Chinese terms take about 1.5 tokens a character, plus the comma,
+# and the Latin letters in a mixed term such as "BERT 模型" about 0.35 each.
 TOKENS_PER_TERM = 4
 TOKENS_PER_CJK_CHAR = 1.5
+TOKENS_PER_MIXED_CHAR = 0.35
 
 _SEPARATORS = re.compile(r"[\n\r\t,，、]")
 _CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")  # also kana, Hangul, full-width
@@ -105,10 +107,17 @@ class TokenCounter:
         if not terms:
             return 0
         if self.tokenizer is None:
-            return sum(max(TOKENS_PER_TERM, 1 + math.ceil(TOKENS_PER_CJK_CHAR * len(_CJK.findall(term))))
-                       for term in terms)
+            return sum(_estimate(term) for term in terms)
         # The same text faster-whisper encodes: " " + hotwords.strip(), no special tokens.
         return len(self.tokenizer.encode(" " + join_terms(terms).strip(), add_special_tokens=False).ids)
+
+
+def _estimate(term: str) -> int:
+    cjk = len(_CJK.findall(term))
+    if not cjk:
+        return TOKENS_PER_TERM
+    other = len("".join(_CJK.sub("", term).split()))
+    return max(TOKENS_PER_TERM, 1 + math.ceil(TOKENS_PER_CJK_CHAR * cjk + TOKENS_PER_MIXED_CHAR * other))
 
 
 @lru_cache(maxsize=4)

@@ -246,11 +246,44 @@ def test_without_a_tokenizer_four_tokens_per_term_are_estimated():
 
 
 def test_chinese_terms_are_estimated_by_character():
-    # large-v3 and small: about 1.5 tokens per Chinese character, plus one for the comma.
+    # large-v3 and small: about 1.5 tokens per Chinese character, 0.35 per other character in the
+    # same term ("BERT 模型"), plus one for the comma.
     counter = TokenCounter()
     assert counter.count(["佐布拉克"]) == 7
     assert counter.count(["庫西"]) == 4  # never below a Latin term's 4
+    assert counter.count(["Zorblax 佐布"]) == 7  # 1 + 1.5 × 2 + 0.35 × 7, rounded up
     assert counter.count(["佐布拉克", "Zorblax"]) == 11
+
+
+@pytest.mark.parametrize("batch_size", [1, 4])
+def test_the_transcriber_hands_the_terms_to_faster_whisper_unchanged(monkeypatch, batch_size):
+    # asr.py is the last step before faster-whisper's get_prompt, which the count mirrors.
+    import faster_whisper
+    import numpy as np
+
+    from localscribe.core import asr
+
+    seen = []
+
+    class FakeModel:
+        def transcribe(self, audio, **options):
+            seen.append(options.get("hotwords"))
+            return iter([]), types.SimpleNamespace(language="en", language_probability=1.0)
+
+    class FakeBatches:
+        def __init__(self, model):
+            self.model = model
+
+        def transcribe(self, audio, **options):
+            return self.model.transcribe(audio, **options)
+
+    monkeypatch.setattr(faster_whisper, "BatchedInferencePipeline", FakeBatches)
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: [(0.0, 1.0)])
+    transcriber = asr.Transcriber.__new__(asr.Transcriber)  # without loading a model
+    transcriber.model = FakeModel()
+    transcriber.transcribe(np.zeros(16000, np.float32), language="en", batch_size=batch_size,
+                           hotwords="Quuxian parsing, Vexley drift")
+    assert seen == ["Quuxian parsing, Vexley drift"]
 
 
 def test_the_chosen_models_own_tokenizer_is_used(tmp_path):
@@ -399,7 +432,8 @@ def fake_window(vocabularies, settings, answer=True, counter=None):
     from localscribe.ui.main_window import MainWindow
 
     window = types.SimpleNamespace(vocabularies=vocabularies, settings=settings, asked=[],
-                                   _token_counter=lambda: counter or TokenCounter(FourPerTerm()))
+                                   _token_counter=lambda: counter or TokenCounter(FourPerTerm()),
+                                   _reload_vocabularies=lambda: None)
     window._confirm_dropped_terms = lambda dropped, exact: window.asked.append((dropped, exact)) or answer
     window._terms_for_run = lambda ask: MainWindow._terms_for_run(window, ask)
     return window
@@ -618,7 +652,7 @@ def test_a_new_word_bank_is_saved_and_chosen(monkeypatch, tmp_path):
     from localscribe.ui.main_window import MainWindow
 
     window = manager(monkeypatch, tmp_path, [LAB])
-    MainWindow._save_vocabulary(window, None, NLP)
+    assert MainWindow._save_vocabulary(window, None, NLP) == ""  # no error for the editor to show
     assert load_vocabularies() == window.vocabularies == [LAB, NLP]
     assert window.settings.vocabulary == "Zorblax seminar" and window.settings_saved
     assert window.shown == (["Lab meeting", "Zorblax seminar"], "Zorblax seminar")
@@ -672,7 +706,55 @@ def test_word_banks_saved_by_another_window_survive_changes_here(monkeypatch, tm
     assert [v.name for v in load_vocabularies()] == ["Lab meeting", "Glimmer studies", "Plonk"]
 
 
-def test_a_failed_save_is_reported_and_changes_nothing(monkeypatch, tmp_path):
+def test_a_failed_save_goes_back_to_the_editor_and_changes_nothing(monkeypatch, tmp_path):
+    from localscribe.ui import main_window
+
+    def disk_full(vocabularies):
+        raise OSError(28, "No space left on device")
+
+    window = manager(monkeypatch, tmp_path, [LAB])
+    monkeypatch.setattr(main_window, "save_vocabularies", disk_full)
+    error = main_window.MainWindow._save_vocabulary(window, None, NLP)
+    assert "No space left" in error  # shown in the editor, which stays open with what was typed
+    assert load_vocabularies() == window.vocabularies == [LAB]
+    assert window.settings.vocabulary == "" and window.shown is None
+
+
+def test_a_file_that_cannot_be_read_is_not_overwritten(monkeypatch, tmp_path):
+    from localscribe.ui import main_window
+
+    def locked():
+        raise PermissionError(13, "The process cannot access the file")
+
+    window = manager(monkeypatch, tmp_path, [LAB])
+    saved = []
+    monkeypatch.setattr(main_window, "load_vocabularies", locked)
+    monkeypatch.setattr(main_window, "save_vocabularies", saved.append)
+    assert "cannot access" in main_window.MainWindow._save_vocabulary(window, None, NLP)
+    assert saved == [] and window.vocabularies == [LAB]
+
+
+def test_a_name_taken_in_another_window_meanwhile_is_refused(monkeypatch, tmp_path):
+    # This window's editor checked the name against what it knew; the file is the last word.
+    from localscribe.ui.main_window import MainWindow
+
+    window = manager(monkeypatch, tmp_path, [NLP])
+    glimmer = Vocabulary("Glimmer studies", ["glimmerform"])
+    save_vocabularies([NLP, glimmer])  # the other window
+    error = MainWindow._save_vocabulary(window, None, Vocabulary("glimmer STUDIES", ["Plonk assay"]))
+    assert "Glimmer studies" in error and load_vocabularies() == [NLP, glimmer]
+
+
+def test_changing_only_the_letter_case_of_a_name_is_fine(monkeypatch, tmp_path):
+    from localscribe.ui.main_window import MainWindow
+
+    window = manager(monkeypatch, tmp_path, [NLP, LAB], chosen="Zorblax seminar")
+    recased = Vocabulary("ZORBLAX Seminar", NLP.terms)
+    assert MainWindow._save_vocabulary(window, window.vocabularies[0], recased) == ""
+    assert load_vocabularies() == [recased, LAB] and window.settings.vocabulary == "ZORBLAX Seminar"
+
+
+def test_a_failed_delete_is_reported_and_changes_nothing(monkeypatch, tmp_path):
     from PySide6.QtWidgets import QMessageBox
 
     from localscribe.ui import main_window
@@ -680,31 +762,37 @@ def test_a_failed_save_is_reported_and_changes_nothing(monkeypatch, tmp_path):
     def disk_full(vocabularies):
         raise OSError(28, "No space left on device")
 
-    window = manager(monkeypatch, tmp_path, [LAB])
+    window = manager(monkeypatch, tmp_path, [NLP, LAB], chosen="Zorblax seminar")
     told = []
     monkeypatch.setattr(main_window, "save_vocabularies", disk_full)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: told.append(a[2]))
-    main_window.MainWindow._save_vocabulary(window, None, NLP)
+    main_window.MainWindow._delete_vocabulary(window, "Zorblax seminar")
     assert len(told) == 1 and "No space left" in told[0]
-    assert load_vocabularies() == window.vocabularies == [LAB]
-    assert window.settings.vocabulary == "" and window.shown is None
+    assert load_vocabularies() == window.vocabularies == [NLP, LAB] and window.settings.vocabulary == "Zorblax seminar"
 
 
-def test_a_file_that_cannot_be_read_is_not_overwritten(monkeypatch, tmp_path):
-    from PySide6.QtWidgets import QMessageBox
+def test_a_run_uses_the_word_banks_as_saved_now(monkeypatch, tmp_path):
+    # Another window may have edited the chosen bank since this one last read the file.
+    from localscribe.ui.main_window import MainWindow
 
+    window = manager(monkeypatch, tmp_path, [NLP], chosen="Zorblax seminar")
+    window._token_counter = lambda: TokenCounter(FourPerTerm())
+    window._reload_vocabularies = lambda: MainWindow._reload_vocabularies(window)
+    save_vocabularies([Vocabulary("Zorblax seminar", ["Plonk assay"])])
+    assert MainWindow._terms_for_run(window, ask=True) == ("Plonk assay", "Zorblax seminar")
+
+
+def test_an_unreadable_file_keeps_this_windows_word_banks(monkeypatch, tmp_path, caplog):
     from localscribe.ui import main_window
 
     def locked():
         raise PermissionError(13, "The process cannot access the file")
 
-    window = manager(monkeypatch, tmp_path, [LAB])
-    told, saved = [], []
+    window = manager(monkeypatch, tmp_path, [NLP])
     monkeypatch.setattr(main_window, "load_vocabularies", locked)
-    monkeypatch.setattr(main_window, "save_vocabularies", saved.append)
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: told.append(a[2]))
-    main_window.MainWindow._save_vocabulary(window, None, NLP)
-    assert saved == [] and len(told) == 1 and window.vocabularies == [LAB]
+    with caplog.at_level(logging.WARNING, logger="localscribe"):
+        main_window.MainWindow._reload_vocabularies(window)
+    assert window.vocabularies == [NLP] and "word banks" in caplog.text
 
 
 # ---- command line -------------------------------------------------------------------
@@ -860,7 +948,12 @@ app.processEvents()
 out["events"] = list(events)
 out["final"] = picker.currentText()
 
+# The main window re-reads the file when the list opens: another window may have added a bank.
+picker.opening.connect(lambda: picker.set_vocabularies(
+    [Vocabulary("Zorblax seminar", ["a", "b"]), Vocabulary("Lab meeting", ["c"]), Vocabulary("Glimmer", ["d"])],
+    "Lab meeting"))
 p = popup()
+out["refreshed"] = p.visible_names()
 QTest.keyClick(p.search, Qt.Key_Escape)
 app.processEvents()
 out["esc_closes"] = picker._popup is None
@@ -898,6 +991,17 @@ out["over"] = [editor.lbl_count.text(), editor.lbl_count.styleSheet()]
 
 edit = VocabularyEditor(Vocabulary("Lab meeting", ["Plonk assay"]), ["Zorblax seminar"], TokenCounter())
 out["edit"] = [edit.windowTitle(), edit.txt_name.text(), edit.txt_terms.toPlainText(), edit.lbl_combined.isHidden()]
+
+saves = []
+failing = VocabularyEditor(None, [], TokenCounter(), on_save=lambda v: saves.append(v.name) or "Disk full")
+failing.txt_name.setText("Glimmer studies")
+failing.txt_terms.setPlainText("glimmerform")
+failing.accept()
+out["save_failed"] = [failing.result(), failing.lbl_error.text(), failing.txt_terms.toPlainText(), saves]
+saving = VocabularyEditor(None, [], TokenCounter(), on_save=lambda v: "")
+saving.txt_name.setText("Glimmer studies")
+saving.accept()
+out["save_ok"] = saving.result()
 print(json.dumps(out))
 '''
 
@@ -923,6 +1027,7 @@ def test_picker_and_editor():
                              ["edit_requested", "Lab meeting"], ["delete_requested", "Zorblax seminar"],
                              ["picked", "Lab meeting"]]
     assert out["final"] == "Lab meeting"
+    assert out["refreshed"] == ["", "Glimmer", "Lab meeting", "Zorblax seminar"]
     assert out["esc_closes"] and out["hide_closes"] and out["reopened"] and out["quiet"]
     assert out["hits"] == ["edit", "delete", None]
     assert out["name_hint"] == "Glimmer studies"
@@ -934,3 +1039,5 @@ def test_picker_and_editor():
     assert out["over"][0].startswith("60 term(s), about 240 / 223 tokens (estimate)")
     assert "#DC2626" in out["over"][1]
     assert out["edit"] == ["Edit word bank", "Lab meeting", "Plonk assay", True]
+    assert out["save_failed"] == [0, "Disk full", "glimmerform", ["Glimmer studies"]]  # still open, nothing lost
+    assert out["save_ok"] == 1
