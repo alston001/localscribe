@@ -1,0 +1,327 @@
+"""One file through decode -> transcribe -> diarize -> align -> export.
+
+The Engine keeps models loaded between files; it is not thread-safe, so use it from one
+worker thread only.
+"""
+
+from __future__ import annotations
+
+import gc
+import os
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+from .. import __version__
+from . import device as dev
+from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
+from .asr import AsrResult
+from .diarization import SpeakerCount, Turn
+from .errors import Cancelled, UserError
+from .media import SAMPLE_RATE, load_audio
+from .models import ModelStore
+from .transcript import Segment, Transcript, TWord
+
+# Punctuated text nudges Whisper to keep punctuation in fast (batched) mode, where each
+# 30 s chunk is decoded without context. Sequential mode keeps punctuation unaided.
+_PUNCTUATION_PROMPT = "Hello, and welcome. Thanks for coming in today; let's get started."
+
+
+@dataclass
+class EngineSettings:
+    models_dir: Path
+    extra_model_dirs: list[Path] = field(default_factory=list)
+    whisper_model: str = "auto"
+    device: str = "auto"      # auto | cuda | cpu
+    diarizer: str = "auto"    # auto | pyannote | sherpa
+    fast_mode: bool = False   # batched decoding: ~3x faster, slightly less accurate
+    cpu_threads: int = 0      # 0 = library default
+
+
+@dataclass
+class JobOptions:
+    language: str | None = "en"   # None = detect
+    speakers: SpeakerCount = field(default_factory=SpeakerCount)
+    normalize: bool = False
+    denoise: bool = False
+    hotwords: str = ""
+    speaker_prefix: str = "Speaker"
+
+
+@dataclass
+class Progress:
+    stage: str          # decode | download | load | transcribe | diarize | export | done
+    overall: float      # 0..1 for the whole file
+    detail: str = ""
+
+
+ProgressFn = Callable[[Progress], None]
+
+
+class _Reporter:
+    def __init__(self, callback: ProgressFn | None, with_diarization: bool):
+        self.callback = callback
+        spans = [("decode", 0.04), ("transcribe", 0.66), ("diarize", 0.27), ("export", 0.03)]
+        if not with_diarization:
+            spans = [("decode", 0.05), ("transcribe", 0.92), ("diarize", 0.0), ("export", 0.03)]
+        self.offsets, start = {}, 0.0
+        for name, width in spans:
+            self.offsets[name] = (start, width)
+            start += width
+        self.current = "decode"
+
+    def __call__(self, stage: str, fraction: float = 0.0, detail: str = "") -> None:
+        if stage in self.offsets:
+            self.current = stage
+        start, width = self.offsets[self.current]
+        if self.callback:
+            self.callback(Progress(stage, min(start + width * max(0.0, min(fraction, 1.0)), 1.0), detail))
+
+
+def _is_gpu_failure(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(k in text for k in ("cuda", "cublas", "cudnn", "out of memory", "gpu"))
+
+
+def _gb(n: int) -> str:
+    return f"{n / 2**30:.2f} GB" if n >= 2**30 else f"{n / 2**20:.0f} MB"
+
+
+class Engine:
+    def __init__(self, settings: EngineSettings, log: Callable[[str], None] | None = None):
+        dev.prepare_environment()
+        self.log = log or (lambda message: None)
+        self.settings = settings
+        self.store = ModelStore(settings.models_dir, settings.extra_model_dirs)
+        self._transcriber = None
+        self._transcriber_key = None
+        self._diarizer = None
+        self._diarizer_key = None
+        self._gpu_failed = False
+
+    def update_settings(self, settings: EngineSettings) -> None:
+        self.settings = settings
+        self.store = ModelStore(settings.models_dir, settings.extra_model_dirs)
+        self._gpu_failed = False  # cached models are swapped lazily when their key changes
+
+    # ---- what will run ---------------------------------------------------
+    def device(self) -> str:
+        return "cpu" if self._gpu_failed else dev.resolve(self.settings.device)
+
+    def whisper_name(self, device: str | None = None) -> str:
+        name = self.settings.whisper_model
+        return dev.auto_whisper_model(device or self.device()) if name == "auto" else name
+
+    def diarizer_name(self) -> str:
+        choice = self.settings.diarizer
+        if choice in ("pyannote", "sherpa"):
+            return choice
+        return "pyannote" if self.store.pyannote_path() else "sherpa"
+
+    # ---- model management -------------------------------------------------
+    def _transcriber_for(self, device: str, report: _Reporter, cancel) -> "object":
+        name = self.whisper_name(device)
+        key = (name, device, str(self.store.root))
+        if self._transcriber is not None and self._transcriber_key == key:
+            return self._transcriber
+        self.release_transcriber()
+        path = self.store.whisper_path(name)
+        if path is None:
+            self.log(f"Downloading Whisper model '{name}'")
+
+            def on_bytes(done: int, total: int) -> None:
+                report("download", 0.0, f"{name}: {_gb(done)} / {_gb(total)}" if total else name)
+
+            path = self.store.ensure_whisper(name, progress=on_bytes, cancel=cancel)
+        report("load", 0.0, name)
+        from .asr import Transcriber
+
+        started = time.monotonic()
+        self._transcriber = Transcriber(path, device, dev.compute_type(device), self.settings.cpu_threads)
+        self._transcriber_key = key
+        self.log(f"Loaded Whisper {name} on {device} ({self._transcriber.compute_type}) "
+                 f"in {time.monotonic() - started:.1f}s")
+        return self._transcriber
+
+    def release_transcriber(self) -> None:
+        if self._transcriber is not None:
+            self._transcriber = None
+            self._transcriber_key = None
+            gc.collect()
+
+    def _diarizer_for(self, name: str, device: str, report: _Reporter, cancel):
+        key = (name, device, str(self.store.root))
+        if self._diarizer is not None and self._diarizer_key == key:
+            return self._diarizer
+        self.release_diarizer()
+        if name == "pyannote":
+            path = self.store.pyannote_path()
+            if path is None:
+                raise UserError("err_pyannote_missing")
+            report("load", 0.0, "pyannote")
+            from .diarization.pyannote_backend import PyannoteDiarizer
+
+            self._diarizer = PyannoteDiarizer(path, device)
+        else:
+            def on_bytes(done: int, total: int) -> None:
+                report("download", 0.0, f"sherpa-onnx: {_gb(done)} / {_gb(total)}" if total else "sherpa-onnx")
+
+            seg, emb = self.store.ensure_sherpa(progress=on_bytes, cancel=cancel)
+            from .diarization.sherpa import SherpaDiarizer
+
+            self._diarizer = SherpaDiarizer(seg, emb, num_threads=max(1, min(8, os.cpu_count() or 4)))
+        self._diarizer_key = key
+        self.log(f"Speaker diarization: {self._diarizer.name} on {device if name == 'pyannote' else 'cpu'}")
+        return self._diarizer
+
+    def release_diarizer(self) -> None:
+        if self._diarizer is not None:
+            close = getattr(self._diarizer, "close", None)
+            if close:
+                close()
+            self._diarizer = None
+            self._diarizer_key = None
+            gc.collect()
+
+    def release_all(self) -> None:
+        self.release_transcriber()
+        self.release_diarizer()
+
+    # ---- steps ---------------------------------------------------------------
+    def _asr(self, audio, opts: JobOptions, device: str, report: _Reporter, cancel) -> AsrResult:
+        transcriber = self._transcriber_for(device, report, cancel)
+        batch = dev.auto_batch_size(device) if self.settings.fast_mode else 1
+        prompt_hotwords = opts.hotwords.strip() or None
+        while True:
+            try:
+                report("transcribe", 0.0, self.whisper_name(device))
+                return transcriber.transcribe(
+                    audio, language=opts.language, batch_size=batch, hotwords=prompt_hotwords,
+                    initial_prompt=_PUNCTUATION_PROMPT if batch > 1 and opts.language in (None, "en") else None,
+                    progress=lambda f: report("transcribe", f, self.whisper_name(device)), cancel=cancel)
+            except Cancelled:
+                raise
+            except Exception as exc:
+                if batch > 1 and "out of memory" in str(exc).lower():
+                    batch //= 2
+                    self.log(f"GPU memory full; retrying with batch size {batch}")
+                    gc.collect()
+                    continue
+                raise
+
+    def transcribe_file(self, path: str | Path, opts: JobOptions, progress: ProgressFn | None = None,
+                        cancel: threading.Event | None = None) -> Transcript:
+        path = Path(path).resolve()
+        diarize = not opts.speakers.single
+        report = _Reporter(progress, diarize)
+        timings: dict[str, float] = {}
+
+        report("decode", 0.0)
+        started = time.monotonic()
+        audio = load_audio(path, normalize=opts.normalize, denoise=opts.denoise, cancel=cancel)
+        duration = len(audio) / SAMPLE_RATE
+        timings["decode"] = time.monotonic() - started
+        if duration < 0.3:
+            raise UserError("err_no_audio")
+        self.log(f"{path.name}: {duration / 60:.1f} min of audio")
+
+        device = self.device()
+        started = time.monotonic()
+        try:
+            asr = self._asr(audio, opts, device, report, cancel)
+        except (Cancelled, UserError):
+            raise
+        except Exception as exc:
+            if device != "cuda" or self.settings.device == "cuda" or not _is_gpu_failure(exc):
+                raise
+            self.log(f"GPU transcription failed ({exc}); continuing on CPU")
+            self._gpu_failed = True
+            self.release_all()
+            device = "cpu"
+            asr = self._asr(audio, opts, device, report, cancel)
+        timings["transcribe"] = time.monotonic() - started
+        report("transcribe", 1.0)
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+
+        turns: list[Turn] = []
+        diarizer_name = "none"
+        if diarize and asr.words:
+            diarizer_name = self.diarizer_name()
+            diarize_device = device if diarizer_name == "pyannote" else "cpu"
+            if diarize_device == "cuda" and dev.detect().vram_gb < 12:
+                self.release_transcriber()  # make room for pyannote on smaller GPUs
+            started = time.monotonic()
+            report("diarize", 0.0, diarizer_name)
+            diarizer = self._diarizer_for(diarizer_name, diarize_device, report, cancel)
+            diarizer_name = diarizer.name
+            if opts.normalize or opts.denoise:
+                # Clean-up filters help recognition but distort voice characteristics
+                # (volume levelling made a 3-person panel cluster as 4), so diarize the original.
+                audio = load_audio(path, cancel=cancel)
+            try:
+                turns = diarizer.diarize(audio, opts.speakers, cancel=cancel,
+                                         progress=lambda f: report("diarize", f, diarizer_name))
+            except (Cancelled, UserError):
+                raise
+            except Exception as exc:
+                if diarize_device != "cuda" or not _is_gpu_failure(exc):
+                    raise
+                self.log(f"GPU diarization failed ({exc}); retrying on CPU")
+                self.release_diarizer()
+                diarize_device = "cpu"
+                diarizer = self._diarizer_for("pyannote", "cpu", report, cancel)
+                turns = diarizer.diarize(audio, opts.speakers, cancel=cancel,
+                                         progress=lambda f: report("diarize", f, diarizer_name))
+            if diarize_device == "cuda":
+                import torch
+
+                torch.cuda.empty_cache()  # hand cached memory back before Whisper reloads
+            timings["diarize"] = time.monotonic() - started
+
+        transcript = build_transcript(path, duration, asr, turns, opts)
+        transcript.settings.update({
+            "whisper_model": self.whisper_name(device), "device": device,
+            "compute_type": dev.compute_type(device), "fast_mode": self.settings.fast_mode,
+            "diarizer": diarizer_name, "timings_s": {k: round(v, 1) for k, v in timings.items()},
+        })
+        self.log(f"{path.name}: {len(transcript.speakers)} speaker(s), "
+                 + ", ".join(f"{k} {v:.1f}s" for k, v in timings.items()))
+        return transcript
+
+
+def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Turn],
+                     opts: JobOptions) -> Transcript:
+    words = asr.words
+    if turns:
+        labels, coverage = assign_speakers(words, turns)
+        labels = smooth_speakers(words, labels, coverage)
+    else:
+        labels = [DEFAULT_SPEAKER] * len(words)
+    groups = group_utterances(words, labels)
+
+    order: list[str] = []  # speakers numbered by first appearance
+    for group in groups:
+        if labels[group[0]] not in order:
+            order.append(labels[group[0]])
+    ids = {raw: f"S{i + 1}" for i, raw in enumerate(order)}
+    prefix = opts.speaker_prefix.strip() or "Speaker"
+    speakers = {ids[raw]: f"{prefix} {i + 1}" for i, raw in enumerate(order)}
+
+    segments = []
+    for group in groups:
+        ws = [words[k] for k in group]
+        segments.append(Segment(speaker=ids[labels[group[0]]], start=ws[0].start, end=ws[-1].end,
+                                text=join_words(ws),
+                                words=[TWord(w.start, w.end, w.text, w.prob) for w in ws]))
+    return Transcript(
+        source=str(path), duration=duration, language=asr.language,
+        created=datetime.now().isoformat(timespec="seconds"), app_version=__version__,
+        settings={"language_requested": opts.language or "auto",
+                  "speakers_requested": {"exact": opts.speakers.exact, "min": opts.speakers.min,
+                                         "max": opts.speakers.max},
+                  "normalize": opts.normalize, "denoise": opts.denoise},
+        speakers=speakers, segments=segments)

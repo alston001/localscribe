@@ -1,0 +1,13 @@
+# PyTorch (CUDA 12.6 build) is installed separately by setup.bat, before this file:
+#   uv pip install torch==2.14.1 torchaudio --index-url https://download.pytorch.org/whl/cu126
+# CTranslate2 4.8 is built for CUDA 12, so PyTorch must stay on a cu12x build (not cu130).
+pyannote.audio==4.0.7
+faster-whisper==1.2.1
+ctranslate2==4.8.3
+sherpa-onnx==1.13.8
+PySide6-Essentials==6.12.0
+python-docx==1.2.0
+openpyxl==3.1.5
+imageio-ffmpeg==0.6.0
+torchcodec==0.17.0
+requests>=2.32

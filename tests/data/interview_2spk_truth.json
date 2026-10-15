@@ -1,0 +1,146 @@
+[
+ {
+  "start": 0.8,
+  "end": 6.295,
+  "speaker": "Zira",
+  "text": "Thank you for joining me today. Could you start by telling me a little about your role in the lab?"
+ },
+ {
+  "start": 6.745,
+  "end": 14.428,
+  "speaker": "David",
+  "text": "Sure. I'm a third year doctoral student, and most of my work focuses on how older adults use voice assistants at home."
+ },
+ {
+  "start": 14.728,
+  "end": 19.054,
+  "speaker": "Zira",
+  "text": "That sounds fascinating. How did you get interested in that topic?"
+ },
+ {
+  "start": 19.654,
+  "end": 28.498,
+  "speaker": "David",
+  "text": "Honestly, it started with my grandmother. She bought a smart speaker and kept asking it about the weather, but it never understood her accent."
+ },
+ {
+  "start": 28.648,
+  "end": 29.089,
+  "speaker": "Zira",
+  "text": "Really?"
+ },
+ {
+  "start": 29.239,
+  "end": 29.652,
+  "speaker": "David",
+  "text": "Yes."
+ },
+ {
+  "start": 30.552,
+  "end": 33.336,
+  "speaker": "Zira",
+  "text": "So that experience shaped your research questions."
+ },
+ {
+  "start": 33.486,
+  "end": 40.3,
+  "speaker": "David",
+  "text": "Exactly. I wanted to understand why these systems work so well for some people and so poorly for others."
+ },
+ {
+  "start": 40.75,
+  "end": 42.682,
+  "speaker": "Zira",
+  "text": "What methods are you using to study it?"
+ },
+ {
+  "start": 43.582,
+  "end": 52.312,
+  "speaker": "David",
+  "text": "Mostly semi structured interviews, plus a two week diary study. Participants record short notes every time the assistant fails."
+ },
+ {
+  "start": 52.462,
+  "end": 55.075,
+  "speaker": "Zira",
+  "text": "How many participants have you recruited so far?"
+ },
+ {
+  "start": 55.975,
+  "end": 61.471,
+  "speaker": "David",
+  "text": "Twenty four. We were aiming for thirty, but recruitment slowed down during the winter."
+ },
+ {
+  "start": 61.771,
+  "end": 62.229,
+  "speaker": "Zira",
+  "text": "Right."
+ },
+ {
+  "start": 62.379,
+  "end": 67.051,
+  "speaker": "David",
+  "text": "We also had a few people drop out after the first week, which was disappointing."
+ },
+ {
+  "start": 67.201,
+  "end": 69.754,
+  "speaker": "Zira",
+  "text": "Did you notice any patterns in why they dropped out?"
+ },
+ {
+  "start": 70.354,
+  "end": 76.844,
+  "speaker": "David",
+  "text": "A couple of them said the diary felt like homework. Others simply lost interest once the novelty wore off."
+ },
+ {
+  "start": 77.444,
+  "end": 83.329,
+  "speaker": "Zira",
+  "text": "That makes sense. Let's talk about your findings. What surprised you the most?"
+ },
+ {
+  "start": 83.479,
+  "end": 92.698,
+  "speaker": "David",
+  "text": "I expected frustration, but I did not expect people to blame themselves. Many participants said things like, I must be speaking wrong."
+ },
+ {
+  "start": 92.998,
+  "end": 96.041,
+  "speaker": "Zira",
+  "text": "Hmm. That is a powerful observation."
+ },
+ {
+  "start": 96.192,
+  "end": 102.407,
+  "speaker": "David",
+  "text": "It really changed how I think about design. The burden should be on the system, not on the person."
+ },
+ {
+  "start": 103.307,
+  "end": 106.425,
+  "speaker": "Zira",
+  "text": "Before we wrap up, is there anything you would like to add?"
+ },
+ {
+  "start": 107.025,
+  "end": 112.606,
+  "speaker": "David",
+  "text": "Only that I'm grateful to everyone who took part. Their stories made this project meaningful."
+ },
+ {
+  "start": 112.756,
+  "end": 114.506,
+  "speaker": "Zira",
+  "text": "Thank you so much for your time."
+ },
+ {
+  "start": 115.406,
+  "end": 116.583,
+  "speaker": "David",
+  "text": "Thank you for having me."
+ }
+]

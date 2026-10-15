@@ -1,0 +1,74 @@
+[
+ {
+  "start": 0.8,
+  "end": 5.483,
+  "speaker": "Zira",
+  "text": "Welcome everyone. Today we are discussing the new library opening hours."
+ },
+ {
+  "start": 6.083,
+  "end": 9.873,
+  "speaker": "David",
+  "text": "I think extending the evening hours would help students who work during the day."
+ },
+ {
+  "start": 10.773,
+  "end": 15.139,
+  "speaker": "Hanhan",
+  "text": "I agree. Many of my classmates study late at night."
+ },
+ {
+  "start": 15.739,
+  "end": 16.838,
+  "speaker": "Zira",
+  "text": "What about weekends?"
+ },
+ {
+  "start": 17.438,
+  "end": 21.859,
+  "speaker": "David",
+  "text": "Weekends are less important in my opinion. Most people stay home."
+ },
+ {
+  "start": 22.759,
+  "end": 27.985,
+  "speaker": "Hanhan",
+  "text": "I disagree. Saturday mornings are very busy at the library."
+ },
+ {
+  "start": 28.885,
+  "end": 32.133,
+  "speaker": "Zira",
+  "text": "Interesting. Do we have any data on that?"
+ },
+ {
+  "start": 32.433,
+  "end": 39.223,
+  "speaker": "Hanhan",
+  "text": "Yes. Last semester the visitor count on Saturday was almost as high as on Monday."
+ },
+ {
+  "start": 39.523,
+  "end": 44.295,
+  "speaker": "David",
+  "text": "Okay, that is a good point. Maybe we should keep weekends as they are."
+ },
+ {
+  "start": 45.195,
+  "end": 50.356,
+  "speaker": "Zira",
+  "text": "Let's summarize. Longer evenings, and no change to the weekend schedule."
+ },
+ {
+  "start": 50.956,
+  "end": 52.136,
+  "speaker": "Hanhan",
+  "text": "Sounds good to me."
+ },
+ {
+  "start": 53.036,
+  "end": 53.549,
+  "speaker": "David",
+  "text": "Agreed."
+ }
+]
