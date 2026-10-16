@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, Sequence, TypeVar
 
 from .. import __version__
 from . import device as dev
@@ -329,7 +329,7 @@ def _speaker_warnings(turns: list[Turn], found: int, count: SpeakerCount) -> lis
 
 
 def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Turn],
-                     opts: JobOptions, lost: list[tuple[float, float]] = ()) -> Transcript:
+                     opts: JobOptions, lost: Sequence[tuple[float, float]] = ()) -> Transcript:
     """`lost`: where speech was heard but no words came out (asr.lost_speech)."""
     words = asr.words
     if turns:

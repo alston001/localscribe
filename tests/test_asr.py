@@ -185,3 +185,9 @@ def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
     result = transcriber.transcribe(np.zeros(16000 * 45, np.float32), language="en", batch_size=8)
     assert result.speech == [(1.0, 20.0), (25.0, 40.0)]
     assert used["checked with"] is used["decoded with"]
+
+
+def test_a_stretch_of_exactly_30_seconds_is_a_gap():
+    words = [Word(0.0, 10.0, " one", 0.9), Word(40.0, 41.0, " two.", 0.9)]
+    assert text_gaps(words, 41.0, []) == [(10.0, 40.0, False)]
+    assert text_gaps(words, 41.0, [], min_length=30.01) == []

@@ -282,8 +282,9 @@ STRINGS: dict[str, tuple[str, str]] = {
     "exp_page": ("第 {n} 頁", "Page {n}"),
     "exp_generated": ("由 LocalScribe 在本機離線產生，請在使用前校對。",
                       "Generated offline by LocalScribe. Please proofread before use."),
-    "exp_gap_silence": ("[無語音 {start}–{end}]", "[No speech {start}–{end}]"),
-    "exp_gap_speech": ("[偵測到語音，但沒有轉出文字 {start}–{end}]", "[Speech detected, no text {start}–{end}]"),
+    # A plain gap may still hold up to 30 s of detected speech, so it claims no silence.
+    "exp_gap_silence": ("[沒有轉出文字 {start}–{end}]", "[Nothing transcribed {start}–{end}]"),
+    "exp_gap_speech": ("[偵測到語音，但沒有轉出文字 {start}–{end}]", "[Speech detected, nothing transcribed {start}–{end}]"),
     "exp_uncertain": ("不確定的字詞", "Unsure words"),
     "exp_uncertain_note_mark": ("Whisper 沒把握的字後面標有 {mark}。", "{mark} follows words Whisper was unsure of."),
     "exp_uncertain_note_highlight": ("Whisper 沒把握的字以黃色標出。", "Words Whisper was unsure of are highlighted in yellow."),

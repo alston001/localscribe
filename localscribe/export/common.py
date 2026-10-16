@@ -17,8 +17,8 @@ _CJK_LANGUAGES = {"zh", "ja", "ko", "yue"}
 # probability asr gives a whole segment that came without word timings.
 UNCERTAIN_BELOW = 0.4
 UNCERTAIN_MARK = "(?)"
-_LEADING = "\"'“‘([{¿¡«"
-_TRAILING = ".,;:!?…。，、；：？！\"'”’)]}»"
+_LEADING = "\"'“‘„‚([{¿¡«‹「『《〈（【［｛"
+_TRAILING = ".,;:!?…。，、；：？！\"'”’“‘)]}»›」』》〉）】］｝—–"
 
 
 @dataclass
@@ -84,27 +84,36 @@ def segment_words(seg: Segment) -> list[TWord]:
 
 
 def is_uncertain(word: TWord) -> bool:
-    return word.prob < UNCERTAIN_BELOW and any(ch.isalnum() for ch in word.text)
+    # Rounded as _transcript.json keeps it, so a re-export marks the same words.
+    return round(word.prob, 3) < UNCERTAIN_BELOW and any(ch.isalnum() for ch in word.text)
 
 
 def _split_word(text: str) -> tuple[str, str, str]:
-    """(punctuation before, the word, punctuation after)."""
+    """(punctuation before, the word, punctuation after). An abbreviation keeps its last
+    period ("U.S."), and a plural possessive its apostrophe ("students'")."""
     core = text.lstrip(_LEADING)
+    lead = text[:len(text) - len(core)]
     word = core.rstrip(_TRAILING)
-    return text[:len(text) - len(core)], word, core[len(word):]
+    trail = core[len(word):]
+    if "." in word and word[-1:].isalpha() and trail.startswith("."):
+        word, trail = word + ".", trail[1:]
+    elif not lead and word.endswith("s") and trail[:1] in ("'", "’"):
+        word, trail = word + trail[0], trail[1:]
+    return lead, word, trail
 
 
 def marked_runs(seg: Segment, options: ExportOptions) -> list[tuple[str, bool]]:
-    """The segment's text as (text, uncertain) runs: each uncertain word on its own, without
-    its punctuation, and everything between it merged. One run of `seg.text` when marking is
-    off or the words no longer say what the text says."""
+    """The segment's text as (text, uncertain) runs: each uncertain word without its
+    punctuation (uncertain words with nothing between them, as in Chinese, form one run), and
+    everything between them merged. One run of `seg.text` when marking is off, the words no
+    longer say what the text says, or the marks would change its spacing."""
     if not options.mark_uncertain or not _words_match(seg):
         return [(seg.text, False)]
     runs: list[tuple[str, bool]] = []
 
     def add(text: str, uncertain: bool) -> None:
-        if text and runs and not uncertain and not runs[-1][1]:
-            runs[-1] = (runs[-1][0] + text, False)
+        if text and runs and runs[-1][1] == uncertain:
+            runs[-1] = (runs[-1][0] + text, uncertain)
         elif text:
             runs.append((text, uncertain))
 
@@ -123,6 +132,8 @@ def marked_runs(seg: Segment, options: ExportOptions) -> list[tuple[str, bool]]:
         else:
             add(before + visible, False)
         space = w.text[-1].isspace()
+    if "".join(text for text, _ in runs) != seg.text:  # e.g. a line break typed into the text
+        return [(seg.text, False)]
     return runs
 
 
@@ -145,8 +156,9 @@ def with_gaps(t: Transcript) -> list[Segment | Gap]:
 
 
 def gap_text(gap: Gap, lang: str) -> str:
-    """"[No speech 00:40:30–00:42:05]", or the speech-detected version, in the headings' language.
-    The times stay even without timestamps: they say where to listen."""
+    """"[Nothing transcribed 00:40:30–00:42:05]", or "[Speech detected, …]" where lost_speech
+    heard speech, in the headings' language. The times stay even without timestamps: they say
+    where to listen."""
     key = "exp_gap_speech" if gap.speech else "exp_gap_silence"
     return tr_in(lang, key, start=clock(gap.start), end=clock(gap.end))
 
@@ -175,8 +187,9 @@ def sentence_rows(t: Transcript) -> list[Row]:
 
 
 def _row(words: list[TWord], speaker: str) -> Row:
-    uncertain = [_split_word(" ".join(w.text.split()))[1] for w in words if is_uncertain(w)]
-    return Row(words[0].start, words[-1].end, speaker, _join(words), uncertain)
+    text = _join(words)
+    runs = marked_runs(Segment("", words[0].start, words[-1].end, text, words), ExportOptions(mark_uncertain=True))
+    return Row(words[0].start, words[-1].end, speaker, text, [run for run, uncertain in runs if uncertain])
 
 
 @dataclass

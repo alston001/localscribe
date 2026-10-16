@@ -175,3 +175,8 @@ def test_a_short_pause_mid_sentence_keeps_the_paragraph():
 def test_join_and_sentence_end_helpers():
     assert join_words(words([(0, 1, " Hello,"), (1, 2, "  world.")])) == "Hello, world."
     assert ends_sentence(' he said "stop."') and not ends_sentence(" and")
+
+
+def test_a_pause_of_exactly_10_seconds_keeps_the_paragraph():
+    ws = words([(0, 1, " So"), (1, 2, " the"), (2, 3, " answer"), (13, 14, " is"), (14, 15, " this.")])
+    assert group_utterances(ws, ["A"] * 5) == [[0, 1, 2, 3, 4]]  # over 10 s breaks, 10 s exactly doesn't

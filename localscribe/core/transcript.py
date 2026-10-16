@@ -100,7 +100,8 @@ class Transcript:
             raise UserError("err_transcript_newer", version=version)
         segments = [_known(Segment, {**s, "words": [_known(TWord, w) for w in s.get("words", [])]})
                     for s in data["segments"]]
-        gaps = [_known(Gap, g) for g in data.get("gaps", [])]
+        # Gaps are extras: a damaged one is dropped rather than making the transcript unreadable.
+        gaps = [_known(Gap, g) for g in data.get("gaps") or [] if isinstance(g, dict) and {"start", "end"} <= g.keys()]
         return _known(cls, {**data, "segments": segments, "gaps": gaps})
 
 

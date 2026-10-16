@@ -115,3 +115,12 @@ def test_no_clips_does_not_claim_english(monkeypatch):
     transcriber = object.__new__(asr.Transcriber)
     result = transcriber.transcribe(np.zeros(16000, np.float32), language=None)
     assert result.language == "" and result.words == []
+
+
+def test_a_damaged_gap_list_costs_only_the_gaps(tmp_path):
+    # Gaps are extras: a null list or a gap without times must not make the transcript unreadable.
+    data = full_transcript().to_dict()
+    data["gaps"] = None
+    assert Transcript.load(write(tmp_path / "a.json", data)).gaps == []
+    data["gaps"] = [{"start": 3.5}, "x", {"start": 41.25, "end": 95.0}]
+    assert Transcript.load(write(tmp_path / "b.json", data)).gaps == [Gap(41.25, 95.0)]

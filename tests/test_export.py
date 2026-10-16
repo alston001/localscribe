@@ -273,17 +273,17 @@ def test_gaps_are_marked_between_paragraphs_in_txt(tmp_path):
     export_txt(gappy_transcript(), tmp_path / "a.txt", ExportOptions())
     assert body(tmp_path / "a.txt") == [
         "[00:00:00] Speaker 1: Welcome back.",
-        "[No speech 00:00:02–00:00:45]",
+        "[Nothing transcribed 00:00:02–00:00:45]",
         "[00:00:45] Speaker 1: Let's continue.",
-        "[Speech detected, no text 00:00:47–00:01:40]",
-        "[No speech 00:01:40–00:02:20]",
+        "[Speech detected, nothing transcribed 00:00:47–00:01:40]",
+        "[Nothing transcribed 00:01:40–00:02:20]",
         "[00:02:20] Speaker 2: One question?"]
 
 
 def test_gap_markers_follow_the_export_language(tmp_path):
     export_txt(gappy_transcript(), tmp_path / "a.txt", ExportOptions(lang="zh_TW", timestamps=False))
     lines = body(tmp_path / "a.txt")
-    assert lines[1] == "[無語音 00:00:02–00:00:45]"  # the times stay: they say where to listen
+    assert lines[1] == "[沒有轉出文字 00:00:02–00:00:45]"  # the times stay: they say where to listen
     assert lines[3] == "[偵測到語音，但沒有轉出文字 00:00:47–00:01:40]"
 
 
@@ -293,13 +293,13 @@ def test_gaps_are_marked_in_md_and_docx(tmp_path):
     t = gappy_transcript()
     export_md(t, tmp_path / "a.md", ExportOptions())
     md = (tmp_path / "a.md").read_text(encoding="utf-8")
-    assert md.index("Welcome back.") < md.index("*[No speech 00:00:02–00:00:45]*") < md.index("Let's continue.")
+    assert md.index("Welcome back.") < md.index("*[Nothing transcribed 00:00:02–00:00:45]*") < md.index("Let's continue.")
     export_docx(t, tmp_path / "a.docx", ExportOptions())
     texts = [p.text for p in Document(str(tmp_path / "a.docx")).paragraphs]
     start = next(i for i, text in enumerate(texts) if text.endswith("Welcome back."))
-    assert texts[start + 1:start + 5] == ["[No speech 00:00:02–00:00:45]", texts[start + 2],
-                                          "[Speech detected, no text 00:00:47–00:01:40]",
-                                          "[No speech 00:01:40–00:02:20]"]
+    assert texts[start + 1:start + 5] == ["[Nothing transcribed 00:00:02–00:00:45]", texts[start + 2],
+                                          "[Speech detected, nothing transcribed 00:00:47–00:01:40]",
+                                          "[Nothing transcribed 00:01:40–00:02:20]"]
     assert texts[start + 2].endswith("Let's continue.")
 
 
@@ -308,7 +308,7 @@ def test_a_gap_filled_in_later_is_not_marked(tmp_path):
     t.segments.insert(2, Segment("S1", 60.0, 62.0, "(inaudible question)"))  # typed in by an editor
     export_txt(t, tmp_path / "a.txt", ExportOptions())
     lines = body(tmp_path / "a.txt")
-    assert not any("Speech detected" in line for line in lines) and "[No speech 00:01:40–00:02:20]" in lines
+    assert not any("Speech detected" in line for line in lines) and "[Nothing transcribed 00:01:40–00:02:20]" in lines
 
 
 def test_subtitles_and_tables_have_no_gap_markers(tmp_path):
@@ -316,7 +316,7 @@ def test_subtitles_and_tables_have_no_gap_markers(tmp_path):
     write_outputs(gappy_transcript(), tmp_path, list(FORMATS), ExportOptions())
     for ext in ("srt", "vtt", "csv"):
         text = (tmp_path / f"lecture_transcript.{ext}").read_text(encoding="utf-8-sig")
-        assert "No speech" not in text and "Speech detected" not in text, ext
+        assert "Nothing transcribed" not in text and "Speech detected" not in text, ext
 
 
 def test_gap_strings_have_both_languages():
@@ -337,3 +337,125 @@ def test_the_legend_explains_the_marks_in_the_headings_language(tmp_path):
     export_md(unsure_transcript(), tmp_path / "b.md", MARK)
     assert "*Generated offline by LocalScribe. Please proofread before use. (?) follows words Whisper was " \
            "unsure of.*" in (tmp_path / "b.md").read_text(encoding="utf-8").splitlines()
+
+
+
+def test_a_plain_gap_does_not_claim_silence():
+    # The voice detector may have heard up to 30 s of speech there (a dropped question), so the
+    # marker says only that nothing was written; "Speech detected" is kept for the lost-speech stretches.
+    for lang in ("en", "zh_TW"):
+        plain = i18n.tr_in(lang, "exp_gap_silence", start="0", end="1")
+        assert "speech" not in plain.lower() and "語音" not in plain
+
+
+def test_marking_never_changes_the_text_s_spacing():
+    # Words match a text up to whitespace; an edited line break must survive the marking.
+    seg = Segment("S1", 0.0, 1.0, "Hello\nworld.", [TWord(0.0, 0.5, " Hello", HIGH), TWord(0.5, 1.0, " world.", LOW)])
+    assert marked_text(seg, MARK) == "Hello\nworld."
+
+
+def test_whitespace_only_and_glued_words_keep_the_text():
+    seg = Segment("S1", 0.0, 1.0, "skip-gram model",
+                  [TWord(0.0, 0.2, " skip", LOW), TWord(0.2, 0.4, "-gram", LOW), TWord(0.4, 0.5, " ", LOW),
+                   TWord(0.5, 1.0, "model", HIGH)])
+    assert marked_text(seg, MARK) == "skip-gram(?) model"  # glued pieces form one mark
+
+
+def test_marks_respect_abbreviations_quotes_and_dashes():
+    def mark(text):
+        return marked_text(Segment("S1", 0.0, 1.0, text, [TWord(0.0, 1.0, " " + text, LOW)]), MARK)
+
+    assert mark("U.S.") == "U.S.(?)"
+    assert mark("e.g.,") == "e.g.(?),"
+    assert mark("students'") == "students'(?)"
+    assert mark("'this'") == "'this(?)'"
+    assert mark("„Wort“") == "„Wort(?)“"
+    assert mark("「分詞」") == "「分詞(?)」"
+    assert mark("word—") == "word(?)—"
+
+
+def test_adjacent_unsure_cjk_characters_form_one_mark(tmp_path):
+    words = [TWord(0.0, 0.2, "我", LOW), TWord(0.2, 0.4, "想", LOW), TWord(0.4, 0.6, "去", LOW),
+             TWord(0.6, 1.0, "學校。", HIGH)]
+    t = unsure_transcript()
+    t.segments = [Segment("S1", 0.0, 1.0, "我想去學校。", words)]
+    assert marked_text(t.segments[0], MARK) == "我想去(?)學校。"
+    export_csv(t, tmp_path / "a.csv", MARK)
+    assert read_csv(tmp_path / "a.csv")[1][5] == "我想去"
+
+
+def test_a_word_is_judged_by_the_probability_the_json_keeps(tmp_path):
+    # _transcript.json keeps 3 decimals; a re-export from it must mark the same words.
+    t = unsure_transcript()
+    t.segments[1].words[0].prob = UNCERTAIN_BELOW - 0.0004
+    export_txt(t, tmp_path / "a.txt", MARK)
+    t.save(tmp_path / "t.json")
+    export_txt(Transcript.load(tmp_path / "t.json"), tmp_path / "b.txt", MARK)
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == (tmp_path / "b.txt").read_text(encoding="utf-8")
+
+
+def test_an_edited_segment_has_no_highlights_in_word(tmp_path):
+    from docx import Document
+
+    t = unsure_transcript()
+    t.segments[0].text = "We start with tokenization, then lemmatisation."
+    export_docx(t, tmp_path / "a.docx", MARK)
+    paragraphs = Document(str(tmp_path / "a.docx")).paragraphs
+    assert not any(r.font.highlight_color for p in paragraphs for r in p.runs)
+    assert any(p.text.endswith("\nWe start with tokenization, then lemmatisation.") for p in paragraphs)
+
+
+def test_gaps_before_after_and_out_of_order():
+    from localscribe.export.common import with_gaps
+
+    t = gappy_transcript()
+    t.gaps = [Gap(142.0, 180.0), Gap(100.0, 140.0), Gap(-1.0, 0.0), Gap(47.0, 100.0, speech=True),
+              Gap(44.0, 46.0)]  # unsorted; the last overlaps "Let's continue." partly
+    t.duration = 180.0
+    order = [(type(item).__name__, item.start) for item in with_gaps(t)]
+    assert order == [("Gap", -1.0), ("Segment", 0.0), ("Segment", 45.0), ("Gap", 47.0), ("Gap", 100.0),
+                     ("Segment", 140.0), ("Gap", 142.0)]
+
+
+def test_the_checkbox_is_saved_and_reaches_the_exports(tmp_path):
+    # Real widgets, offscreen, in their own process; the hardware probe is replaced so nothing loads torch.
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = r'''
+import json, sys
+from pathlib import Path
+from localscribe import paths
+paths.user_data_dir = lambda: Path(sys.argv[1])
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QApplication
+app = QApplication([])
+from localscribe.config import Settings
+from localscribe.ui import main_window
+
+class NoProbe(QThread):
+    ready = Signal(object)
+
+    def run(self):
+        pass
+
+main_window.DeviceProbe = NoProbe
+window = main_window.MainWindow(Settings())
+assert not window.chk_uncertain.isChecked()
+window.chk_uncertain.setChecked(True)
+saved = json.loads((Path(sys.argv[1]) / "settings.json").read_text(encoding="utf-8"))
+again = main_window.MainWindow(Settings.load(Path(sys.argv[1]) / "settings.json"))
+print(json.dumps([saved["mark_uncertain"], again.chk_uncertain.isChecked(),
+                  again.settings.export_options("en").mark_uncertain]))
+for w in (window, again):
+    for thread in list(w._helpers):
+        thread.wait()
+'''
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run([sys.executable, "-c", script, str(tmp_path)], cwd=root, env=env,
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == [True, True, True]
