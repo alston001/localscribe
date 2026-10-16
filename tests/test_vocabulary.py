@@ -299,7 +299,8 @@ def test_the_transcriber_hands_the_terms_to_faster_whisper_unchanged(monkeypatch
     transcriber.model = FakeModel()
     transcriber.transcribe(np.zeros(16000, np.float32), language="en", batch_size=batch_size,
                            hotwords="Quuxian parsing, Vexley drift")
-    assert seen == ["Quuxian parsing, Vexley drift"]
+    # The bank's text arrives unchanged; a clip it leaves without words is decoded again without it.
+    assert seen[0] == "Quuxian parsing, Vexley drift" and set(seen[1:]) <= {None}
 
 
 def test_the_chosen_models_own_tokenizer_is_used(tmp_path):

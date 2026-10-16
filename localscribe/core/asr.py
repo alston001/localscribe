@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import math
 import re
 import threading
@@ -177,6 +178,67 @@ def _drop_credits(words: list[Word]) -> list[Word]:
     return kept
 
 
+# Text that starts or ends further than this inside its clip left speech out (see uncovered).
+UNCOVERED_GAP = 1.5
+
+
+def uncovered(clip: tuple[float, float], words: list[Word], gap: float = UNCOVERED_GAP) -> list[tuple[float, float]]:
+    """The parts of `clip` that `words` leave without text: its start or its end when the text
+    begins or stops more than `gap` seconds inside it, or all of it when drop_sign_offs would keep
+    no word. In classroom-like tests the normal margins (the voice detector's padding, Whisper's
+    timing) stayed under 1.4 s, while speech a word bank lost left 9-24 s."""
+    start, end = clip
+    kept = drop_sign_offs(sorted(words, key=lambda w: w.start))
+    if not kept:
+        return [(start, end)]
+    parts = []
+    if kept[0].start - start > gap:
+        parts.append((start, kept[0].start))
+    last = max(w.end for w in kept)
+    if end - last > gap:
+        parts.append((last, end))
+    return parts
+
+
+def fill_gaps(parts: list[tuple[float, float]], kept: list[Word], other: list[Word]) -> list[Word]:
+    """The words of `other` (the same clip decoded again) whose middle falls in one of `parts`,
+    without one that repeats the kept word right next to the part (the same word, timed apart).
+    Sign-offs are dropped from `other` first: a piece of one ("very much.") would get past
+    drop_sign_offs later."""
+    def bare(word: Word) -> str:
+        return re.sub(r"[^\w']", "", word.text.lower())
+
+    other = drop_sign_offs(sorted(other, key=lambda w: w.start))
+    filled = []
+    for start, end in parts:
+        picked = [w for w in other if start <= (w.start + w.end) / 2 < end]
+        after = next((k for k in kept if k.start >= end - 0.01), None)
+        if picked and after and bare(picked[-1]) == bare(after) and picked[-1].end > after.start - 0.5:
+            picked.pop()
+        before = next((k for k in reversed(kept) if k.end <= start + 0.01), None)
+        if picked and before and bare(picked[0]) == bare(before) and picked[0].start < before.end + 0.5:
+            picked.pop(0)
+        filled += picked
+    return filled
+
+
+def _words_of(seg) -> list[Word]:
+    if seg.words:
+        return [Word(float(w.start), float(w.end), w.word, float(w.probability)) for w in seg.words]
+    if seg.text.strip():
+        return [Word(float(seg.start), float(seg.end), " " + seg.text.strip(), 0.5)]
+    return []
+
+
+def _in_clip(words: list[Word], clips: list[tuple[float, float]]) -> dict[int, list[Word]]:
+    """`words` by the index of the clip their middle falls in."""
+    starts = [start for start, _ in clips]
+    out: dict[int, list[Word]] = {}
+    for word in words:
+        out.setdefault(max(bisect.bisect_right(starts, (word.start + word.end) / 2) - 1, 0), []).append(word)
+    return out
+
+
 def speech_clips(audio: np.ndarray, threshold: float = 0.2, max_len: float = 28.0,
                  join_gap: float = 1.0) -> list[tuple[float, float]]:
     """Speech regions grouped into clips of at most `max_len` seconds, cut at pauses.
@@ -227,61 +289,85 @@ class Transcriber:
             vad = VadOptions(max_speech_duration_s=30, min_silence_duration_ms=160)
             found, info = BatchedInferencePipeline(self.model).transcribe(
                 audio, batch_size=batch_size, vad_filter=True, vad_parameters=vad, **options)
-            segments = ((seg, min(seg.end / duration, 1.0)) for seg in found)
+            pieces = ((_words_of(seg), min(seg.end / duration, 1.0)) for seg in found)
             speech = [(r["start"] / SAMPLE_RATE, r["end"] / SAMPLE_RATE)
                       for r in get_speech_timestamps(audio, vad)]
         else:
             clips = speech_clips(audio)
             if not clips:
                 return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
-            segments, info = self._decode_clips(audio, clips, options)
+            pieces, info = self._decode_clips(audio, clips, options)
             speech = list(clips)
 
         words: list[Word] = []
-        for seg, done in segments:  # generator: decoding happens while iterating
+        for piece, done in pieces:  # generator: decoding happens while iterating
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
-            if seg.words:
-                words.extend(Word(float(w.start), float(w.end), w.word, float(w.probability))
-                             for w in seg.words)
-            elif seg.text.strip():
-                words.append(Word(float(seg.start), float(seg.end), " " + seg.text.strip(), 0.5))
+            words += piece
             if progress is not None and duration > 0:
                 progress(done)
         words.sort(key=lambda w: w.start)
         return AsrResult(info.language, float(info.language_probability), words, speech)
 
     def _decode_clips(self, audio: np.ndarray, clips: list[tuple[float, float]], options: dict):
-        """(segments, each with the share of the speech decoded so far, info). Every clip is decoded
-        on its own and without conditioning, so one misheard phrase cannot snowball into a
+        """(words in pieces, each with the share of the work done so far, info). Every clip is
+        decoded on its own and without conditioning, so one misheard phrase cannot snowball into a
         repetition loop.
 
-        A clip that starts where the previous one ended was cut out of running speech and begins
-        mid-sentence. With hotwords (a word bank), Whisper dropped the first words of 8 of 162 such
-        synthetic clips, against none without, so those clips are decoded without them.
+        With hotwords (a word bank) Whisper sometimes leaves speech out, so:
+        - A clip that starts where the previous one ended was cut out of running speech and begins
+          mid-sentence; with a bank, Whisper dropped the first words of 8 of 162 such synthetic
+          clips (none without). Those clips are decoded without the hotwords.
+        - In the other clips, the parts the text leaves out (see uncovered) are decoded again
+          without the hotwords and filled from that (see fill_gaps). On a real 79-minute lecture a
+          bank lost 5 stretches of speech at clip starts and ends, against 1 without it.
         """
+        bank = options["hotwords"]
         cut = {i for i in range(1, len(clips)) if clips[i][0] - clips[i - 1][1] < 0.1}
         groups = [[c for i, c in enumerate(clips) if i not in cut], [c for i, c in enumerate(clips) if i in cut]]
-        if not options["hotwords"] or not groups[1]:
+        if not bank or not groups[1]:
             groups = [clips, []]
         total = sum(end - start for start, end in clips)
+        share = 0.9 if bank else 1.0  # with a bank, the rest is for decoding left-out speech again
 
         def decode(group: list[tuple[float, float]], opts: dict):
             return self.model.transcribe(audio, vad_filter=False, clip_timestamps=[t for c in group for t in c],
                                          condition_on_previous_text=False, **opts)
 
         first, info = decode(groups[0], options)
+        plain = {**options, "hotwords": None, "language": info.language}  # both decodes in one language
 
-        def segments():
-            done = 0.0
+        def pieces():
+            done, banked = 0.0, []
             for group, found in ((groups[0], first), (groups[1], None)):
                 if not group:
                     continue
-                if found is None:  # with the language already detected, so both decodes agree
-                    found, _ = decode(group, {**options, "hotwords": None, "language": info.language})
-                for seg in found:
+                for seg in found if found is not None else decode(group, plain)[0]:
+                    words = _words_of(seg)
+                    if bank and group is groups[0]:  # held back until checked (see below)
+                        banked, words = banked + words, []
                     covered = sum(max(0.0, min(end, seg.end) - start) for start, end in group)
-                    yield seg, min((done + covered) / total, 1.0)
+                    yield words, min((done + covered) / total, 1.0) * share
                 done += sum(end - start for start, end in group)
+            if not bank:
+                return
+            by_clip = _in_clip(banked, groups[0])
+            gaps = {k: uncovered(clip, by_clip.get(k, [])) for k, clip in enumerate(groups[0])}
+            redo = {k: n for n, k in enumerate(k for k, parts in gaps.items() if parts)}
+            again, reached = [], share
+            if redo:
+                last_end = groups[0][max(redo)][1]
+                for seg in decode([groups[0][k] for k in redo], plain)[0]:
+                    again += _words_of(seg)
+                    reached = max(reached, share + (1 - share) * min(seg.end / last_end, 1.0))
+                    yield [], reached
+            redone = _in_clip(again, [groups[0][k] for k in redo])
+            for k in range(len(groups[0])):
+                words = by_clip.get(k, [])
+                if k in redo:  # only what survives drop_sign_offs, or two decodes' sign-offs could interleave
+                    kept = drop_sign_offs(sorted(words, key=lambda w: w.start))
+                    words = kept + fill_gaps(gaps[k], kept, redone.get(redo[k], []))
+                yield words, reached
+            yield [], 1.0
 
-        return segments(), info
+        return pieces(), info
