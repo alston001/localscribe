@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 Changes since 0.1.1, from a code review and a round of hands-on testing.
 
@@ -74,7 +74,7 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 
 ### 中文摘要
 
-以下是 0.1.1 之後的變更，來自程式碼審查與實機測試，尚未發佈。
+以下是 0.1.1 之後的變更，來自程式碼審查與實機測試。
 
 - **詞庫**：主視窗新增「詞庫」選單，可以為每門課或每個主題建一份專有名詞清單，開始前選好，Whisper 比較不會聽錯，例如把 tokenization 寫成 organization。Whisper 最多只讀約 55 個英文詞，超過時開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`。詞庫原本會讓 Whisper 在停頓處寫出影片字幕致謝，並跳過部分片段的開頭，現在都已處理：
   - 英文錄音改用一句話交出詞庫；
