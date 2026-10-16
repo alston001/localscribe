@@ -381,9 +381,9 @@ def test_wrong_item_types_in_settings_are_dropped(tmp_path):
 
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"formats": ["docx", 5, {"a": 1}, "srt"], "speakers_exact": True,
-                                "fast_mode": 1, "preset": "custom"}), encoding="utf-8")
+                                "normalize": 1, "preset": "custom"}), encoding="utf-8")
     s = Settings.load(path)
-    assert s.formats == ["docx", "srt"] and s.speakers_exact == 2 and s.fast_mode is False
+    assert s.formats == ["docx", "srt"] and s.speakers_exact == 2 and s.normalize is False
 
 
 def test_missing_settings_file_is_not_backed_up(tmp_path):

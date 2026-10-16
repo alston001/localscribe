@@ -126,14 +126,3 @@ def auto_whisper_model(device: str) -> str:
     if device == "cuda":
         return "large-v3" if detect().vram_gb >= 5.5 else "large-v3-turbo"
     return "small"
-
-
-def auto_batch_size(device: str) -> int:
-    if device == "cpu":
-        return 1
-    vram = detect().vram_gb
-    if vram >= 12:
-        return 16
-    if vram >= 7:
-        return 8
-    return 4

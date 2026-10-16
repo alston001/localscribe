@@ -55,7 +55,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model", default="auto", help="auto, large-v3, large-v3-turbo, medium, small, base")
     p.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     p.add_argument("--diarizer", default="auto", choices=["auto", "pyannote", "sherpa"])
-    p.add_argument("--fast", action="store_true", help="batched decoding (faster, slightly less accurate)")
     p.add_argument("--normalize", action="store_true", help="even out loud and quiet voices")
     p.add_argument("--denoise", action="store_true", help="reduce background noise")
     p.add_argument("--no-timestamps", action="store_true")
@@ -88,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     engine = Engine(EngineSettings(models_dir=args.models_dir or paths.default_models_dir(),
                                    extra_model_dirs=[d for d in [paths.bundled_models_dir()] if d],
                                    whisper_model=args.model, device=args.device,
-                                   diarizer=args.diarizer, fast_mode=args.fast),
+                                   diarizer=args.diarizer),
                     log=lambda m: print(f"\r  {m}".ljust(90)))
     terms = prompt_terms(vocabulary, args.hotwords)
     if terms:  # "auto" names the model by its GPU check, which the first file needs anyway

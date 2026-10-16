@@ -1,6 +1,5 @@
 """What the voice detector heard versus what Whisper wrote, with fake segments (no model needed)."""
 
-import sys
 import types
 
 import numpy as np
@@ -332,34 +331,6 @@ def test_a_clip_decoded_again_keeps_no_sign_off_of_the_first_decode(monkeypatch)
     transcriber.model = SignsOff()
     result = transcriber.transcribe(np.zeros(16000 * 25, np.float32), language="en", hotwords="Quuxian")
     assert text(result.words) == " Real words."  # each decode's sign-off dropped whole
-
-
-def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
-    used = {}
-
-    class FakeBatched:
-        def __init__(self, model):
-            self.model = model
-
-        def transcribe(self, audio, batch_size, vad_filter, vad_parameters, **options):
-            used["decoded with"] = vad_parameters
-            return self.model.transcribe(audio, **options)
-
-    def get_speech_timestamps(audio, options):
-        used["checked with"] = options
-        return [{"start": 16000, "end": 16000 * 20}, {"start": 16000 * 25, "end": 16000 * 40}]
-
-    fake_fw = types.ModuleType("faster_whisper")
-    fake_fw.BatchedInferencePipeline = FakeBatched
-    fake_vad = types.ModuleType("faster_whisper.vad")
-    fake_vad.VadOptions = lambda **kw: dict(kw)
-    fake_vad.get_speech_timestamps = get_speech_timestamps
-    monkeypatch.setitem(sys.modules, "faster_whisper", fake_fw)
-    monkeypatch.setitem(sys.modules, "faster_whisper.vad", fake_vad)
-    transcriber = fake_transcriber(monkeypatch, [])
-    result = transcriber.transcribe(np.zeros(16000 * 45, np.float32), language="en", batch_size=8)
-    assert result.speech == [(1.0, 20.0), (25.0, 40.0)]
-    assert used["checked with"] is used["decoded with"]
 
 
 def test_a_stretch_of_exactly_30_seconds_is_a_gap():

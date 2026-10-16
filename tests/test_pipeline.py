@@ -371,18 +371,3 @@ def test_detect_survives_a_broken_cuda_setup(monkeypatch):
         assert dev.detect().cuda is False
     finally:
         dev.detect.cache_clear()
-
-
-# ---- B4: the English punctuation prompt ------------------------------------------
-@pytest.mark.parametrize("language, prompted", [("en", True), (None, False), ("zh", False)])
-def test_punctuation_prompt_only_for_english(fake_models, monkeypatch, language, prompted):
-    prompts = []
-
-    def record(self, audio, language=None, initial_prompt=None, **kw):
-        prompts.append(initial_prompt)
-        return AsrResult(language or "en", 1.0, list(WORDS))
-
-    monkeypatch.setattr(FakeTranscriber, "transcribe", record)
-    engine = make_engine(fake_models, fast_mode=True)  # batched on the GPU: where the prompt is used
-    engine.transcribe_file(fake_models / "talk.wav", JobOptions(language=language, speakers=SpeakerCount(exact=1)))
-    assert (prompts[0] is not None) == prompted

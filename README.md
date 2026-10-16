@@ -57,7 +57,7 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
 
 **How it works**: FFmpeg decodes the file to 16 kHz mono → a voice detector finds speech and cuts it into clips of up to 28 s at natural pauses → Whisper transcribes each clip with word timestamps → pyannote or sherpa-onnx works out who spoke when → each word is matched to a speaker, and boundary words that land on the wrong side of a speaker change are pulled back into their sentence → the result is written in every format you picked.
 
-**Word banks**: Whisper often mishears technical terms (e.g. "tokenization" written as "organization"). Keep the terms of each course or topic in a word bank and pick it before you click **Start**. In the **Word bank** menu, choose **+ New word bank…**, give it a name such as "NLP class" and enter one term per line (a pasted comma-separated list works too). The pencil and bin icons in the same menu edit and delete banks; type in its search box to find one. The chosen bank's terms are combined with **Settings → Names and terms**, bank first. Whisper reads only the first 223 tokens of these terms: about 55 English terms, or 35 Chinese ones. The editor counts them as you type, and if the bank and Names and terms together go over, LocalScribe lists the terms that would be left out before the run starts. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json` (copy that file to use them on another computer), and `_transcript.json` records which bank was used. With a bank, transcription takes longer (about a third longer on a 78-minute lecture). The reason: wherever the text with the bank starts late or ends early in a stretch of speech, that part is transcribed again without the bank, so nothing said goes missing. Fast mode doesn't have this check yet.
+**Word banks**: Whisper often mishears technical terms (e.g. "tokenization" written as "organization"). Keep the terms of each course or topic in a word bank and pick it before you click **Start**. In the **Word bank** menu, choose **+ New word bank…**, give it a name such as "NLP class" and enter one term per line (a pasted comma-separated list works too). The pencil and bin icons in the same menu edit and delete banks; type in its search box to find one. The chosen bank's terms are combined with **Settings → Names and terms**, bank first. Whisper reads only the first 223 tokens of these terms: about 55 English terms, or 35 Chinese ones. The editor counts them as you type, and if the bank and Names and terms together go over, LocalScribe lists the terms that would be left out before the run starts. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json` (copy that file to use them on another computer), and `_transcript.json` records which bank was used. With a bank, transcription takes longer (about a third longer on a 78-minute lecture). The reason: wherever the text with the bank starts late or ends early in a stretch of speech, that part is transcribed again without the bank, so nothing said goes missing.
 
 **Proofreading aids** help you decide where to listen again:
 
@@ -94,7 +94,6 @@ Settings dialog:
 | Speaker label | The word used in transcripts, e.g. "Speaker" gives Speaker 1, Speaker 2 |
 | Model | *Automatic* picks large-v3 on a GPU and small on a CPU. large-v3-turbo is much faster with slightly lower accuracy |
 | Device | *Automatic*, NVIDIA GPU or CPU. If the GPU fails, Automatic switches to the CPU by itself |
-| Fast mode | Batched decoding: faster on a GPU, but punctuation and speaker changes are slightly less accurate |
 | Names and terms | Comma-separated names and jargon (e.g. `Dr. Patel, NVivo`) to help Whisper spell them. Handy for one-off names; they are added after the chosen word bank's terms |
 | Speaker diarization engine | *Automatic* uses pyannote when it is installed, otherwise sherpa-onnx |
 | Model folder | Where models are stored and downloaded |
@@ -126,7 +125,7 @@ Always proofread. Speech recognition errors cluster around names, technical term
 | **40%** | **3.3%** | **76%** | **31%** |
 | 50% | 5.1% | 68% | 42% |
 
-In the clean and reverberant recordings, the ones closest to a usable class recording, 40% marked 0.9% of the words and 18 of those 32 words were wrong. 50% marked almost twice as many, but 22 of the 28 extra marks were correct words. In the NLP lecture, 29 of the 37 marks were errors, such as "quarter stemmer" for "Porter stemmer" (18%). "Atom optimizer" for "Adam optimizer" (65%) and "Zip's law" for "Zipf's law" (89%) got no mark: confident errors are why a mark can't replace proofreading or a word bank. The small model, which computers without an NVIDIA GPU use, makes more errors, so it marked more words (2.8% in the clean and reverberant recordings), and 68% of its marks were errors. Fast mode marked about as many words as the default (1.1%), but more of its marks fell on correct words at the edges of its 30-second chunks.
+In the clean and reverberant recordings, the ones closest to a usable class recording, 40% marked 0.9% of the words and 18 of those 32 words were wrong. 50% marked almost twice as many, but 22 of the 28 extra marks were correct words. In the NLP lecture, 29 of the 37 marks were errors, such as "quarter stemmer" for "Porter stemmer" (18%). "Atom optimizer" for "Adam optimizer" (65%) and "Zip's law" for "Zipf's law" (89%) got no mark: confident errors are why a mark can't replace proofreading or a word bank. The small model, which computers without an NVIDIA GPU use, makes more errors, so it marked more words (2.8% in the clean and reverberant recordings), and 68% of its marks were errors.
 
 **Speed** on an RTX 3070 Ti (8 GB) with a Ryzen 7 5800X:
 
@@ -162,7 +161,7 @@ The token is used only for that download and is never stored. Public releases do
 | "Windows protected your PC" when installing | The installer isn't code-signed. Click **More info → Run anyway** |
 | Installer says the path is too long | Windows limits paths to 260 characters. Install to a shorter folder such as `C:\LocalScribe` |
 | The status bar shows the CPU although you have an NVIDIA GPU | Update the NVIDIA driver (CUDA 12 support is required), then restart LocalScribe |
-| Very slow | Without a GPU, expect about 20+ minutes per hour of audio. Try **Settings → Model → small**, or turn on Fast mode if you have a GPU |
+| Very slow | Without a GPU, expect about 20+ minutes per hour of audio. Try **Settings → Model → small** |
 | A file fails with "can't be decoded" | The audio codec isn't supported. Convert it with another tool, or check that the file plays |
 | pyannote download: "token rejected" | Copy the whole token (it starts with `hf_`) and make sure it has Read access |
 | pyannote download: "no access yet" | Sign in to Hugging Face and accept the conditions on the model page first |
@@ -254,7 +253,7 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 
 **情境**：一對一訪談（固定 2 人）、小組會議（2–10 人）、演講課堂（自動判斷人數）、線上會議（自動判斷人數，含降噪）。知道確切人數時，直接指定人數，分辨說話人的效果最好；但不要把上限設得比實際人數少，否則同一個人可能被拆成兩位。
 
-**詞庫**：Whisper 常把專有名詞聽錯（例如把 "tokenization" 寫成 "organization"）。可以為每門課或每個主題建立一個詞庫，開始轉換前在「詞庫」選單選好。選「＋ 新增詞庫…」，取個名稱（例如「NLP 課」），一行輸入一個詞（也可以貼上以逗號分隔的清單）；同一個選單裡的鉛筆和垃圾桶圖示可以編輯或刪除詞庫。詞庫的詞會和「設定 → 專有名詞」一起使用，詞庫在前。Whisper 最多只讀前 223 個 token（約 55 個英文詞或 35 個中文詞），編輯時會即時顯示用量；兩者加起來超過時，開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`，`_transcript.json` 會記錄用了哪個詞庫。使用詞庫時轉錄會比較久（78 分鐘的課堂錄音約多三分之一的時間）：用詞庫轉出的文字如果比語音晚開始或早結束，那一段會不帶詞庫重轉，確保不漏字。快速模式目前沒有這項檢查。
+**詞庫**：Whisper 常把專有名詞聽錯（例如把 "tokenization" 寫成 "organization"）。可以為每門課或每個主題建立一個詞庫，開始轉換前在「詞庫」選單選好。選「＋ 新增詞庫…」，取個名稱（例如「NLP 課」），一行輸入一個詞（也可以貼上以逗號分隔的清單）；同一個選單裡的鉛筆和垃圾桶圖示可以編輯或刪除詞庫。詞庫的詞會和「設定 → 專有名詞」一起使用，詞庫在前。Whisper 最多只讀前 223 個 token（約 55 個英文詞或 35 個中文詞），編輯時會即時顯示用量；兩者加起來超過時，開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`，`_transcript.json` 會記錄用了哪個詞庫。使用詞庫時轉錄會比較久（78 分鐘的課堂錄音約多三分之一的時間）：用詞庫轉出的文字如果比語音晚開始或早結束，那一段會不帶詞庫重轉，確保不漏字。
 
 **校對輔助**：勾選「標記不確定的字詞」（預設關閉）後，Whisper 把握低於 40% 的字會被標出：Word 以黃色標示，txt 和 md 在字後加 (?)，Excel 和 CSV 多一欄「不確定的字詞」；字幕不標記。很有把握卻聽錯的字（例如把 tokenization 聽成 organization）不會被標出，所以標記只是告訴你先從哪裡重聽，不能取代詞庫和校對。另外，30 秒以上沒有轉出文字的地方，txt、md 和 Word 會寫上「[沒有轉出文字 00:40:30–00:42:05]」，多半是停頓或下課，但偵測器可能聽到不到 30 秒的說話聲；如果那段偵測到 30 秒以上的說話聲，會寫「[偵測到語音，但沒有轉出文字 …]」，請回去聽是否漏掉內容。超過 10 秒的停頓也會開始新段落，時間戳記就看得出中間的空白。
 

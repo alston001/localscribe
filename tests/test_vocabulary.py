@@ -271,10 +271,8 @@ def test_chinese_terms_are_estimated_by_character():
     assert counter.count(["佐布拉克", "Zorblax"]) == 11
 
 
-@pytest.mark.parametrize("batch_size", [1, 4])
-def test_the_transcriber_hands_the_terms_to_faster_whisper_unchanged(monkeypatch, batch_size):
+def test_the_transcriber_hands_the_terms_to_faster_whisper_unchanged(monkeypatch):
     # asr.py is the last step before faster-whisper's get_prompt, which the count mirrors.
-    import faster_whisper
     import numpy as np
 
     from localscribe.core import asr
@@ -286,18 +284,10 @@ def test_the_transcriber_hands_the_terms_to_faster_whisper_unchanged(monkeypatch
             seen.append(options.get("hotwords"))
             return iter([]), types.SimpleNamespace(language="en", language_probability=1.0)
 
-    class FakeBatches:
-        def __init__(self, model):
-            self.model = model
-
-        def transcribe(self, audio, **options):
-            return self.model.transcribe(audio, **options)
-
-    monkeypatch.setattr(faster_whisper, "BatchedInferencePipeline", FakeBatches)
     monkeypatch.setattr(asr, "speech_clips", lambda audio: [(0.0, 1.0)])
     transcriber = asr.Transcriber.__new__(asr.Transcriber)  # without loading a model
     transcriber.model = FakeModel()
-    transcriber.transcribe(np.zeros(16000, np.float32), language="en", batch_size=batch_size,
+    transcriber.transcribe(np.zeros(16000, np.float32), language="en",
                            hotwords="Quuxian parsing, Vexley drift")
     # The bank's text arrives unchanged; a clip it leaves without words is decoded again without it.
     assert seen[0] == "Quuxian parsing, Vexley drift" and set(seen[1:]) <= {None}

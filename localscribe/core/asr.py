@@ -272,32 +272,21 @@ class Transcriber:
         self.model = WhisperModel(str(self.model_dir), device=device, compute_type=compute_type,
                                   cpu_threads=cpu_threads, local_files_only=True)
 
-    def transcribe(self, audio: np.ndarray, language: str | None = None, batch_size: int = 1,
-                   hotwords: str | None = None, initial_prompt: str | None = None,
+    def transcribe(self, audio: np.ndarray, language: str | None = None,
+                   hotwords: str | None = None,
                    progress: Callable[[float], None] | None = None,
                    cancel: threading.Event | None = None) -> AsrResult:
-        """batch_size 1 decodes sequentially (best punctuation and word timing, which also
-        matters for speaker attribution); larger batches are ~3x faster on a GPU."""
+        """Decodes clip by clip (see speech_clips): sequential decoding keeps punctuation and word
+        timing best, and speaker attribution depends on both. Batched decoding ("fast mode", ~3x
+        faster on a GPU) was removed: in tests it dropped whole sentences without a warning."""
         duration = len(audio) / SAMPLE_RATE
         options = dict(language=language or None, word_timestamps=True, beam_size=5,
-                       hotwords=hotwords or None, initial_prompt=initial_prompt)
-        if batch_size > 1:
-            from faster_whisper import BatchedInferencePipeline
-            from faster_whisper.vad import VadOptions, get_speech_timestamps
-
-            # The pipeline's own defaults, spelled out so `speech` holds the regions it decodes.
-            vad = VadOptions(max_speech_duration_s=30, min_silence_duration_ms=160)
-            found, info = BatchedInferencePipeline(self.model).transcribe(
-                audio, batch_size=batch_size, vad_filter=True, vad_parameters=vad, **options)
-            pieces = ((_words_of(seg), min(seg.end / duration, 1.0)) for seg in found)
-            speech = [(r["start"] / SAMPLE_RATE, r["end"] / SAMPLE_RATE)
-                      for r in get_speech_timestamps(audio, vad)]
-        else:
-            clips = speech_clips(audio)
-            if not clips:
-                return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
-            pieces, info = self._decode_clips(audio, clips, options)
-            speech = list(clips)
+                       hotwords=hotwords or None)
+        clips = speech_clips(audio)
+        if not clips:
+            return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
+        pieces, info = self._decode_clips(audio, clips, options)
+        speech = list(clips)
 
         words: list[Word] = []
         for piece, done in pieces:  # generator: decoding happens while iterating

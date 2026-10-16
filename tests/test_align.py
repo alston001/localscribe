@@ -84,7 +84,7 @@ def test_early_change_moves_forward_to_a_pause():
 
 
 def test_words_stretched_over_a_lost_interjection_rejoin_their_sentence():
-    # From the synthetic interview in fast mode: Whisper dropped B's "Right." and stretched
+    # From the synthetic interview, decoded in batches (the since-removed fast mode): Whisper dropped B's "Right." and stretched
     # A's next words over it, so the transcript read "We also / had a few people".
     ws = words([(0.94, 1.26, " winter."), (1.46, 1.88, " We"), (1.88, 2.64, " also"),
                 (2.64, 3.06, " had"), (3.06, 3.14, " a"), (3.14, 3.32, " few"),

@@ -40,7 +40,6 @@ class Settings:
     whisper_model: str = "auto"
     device: str = "auto"
     diarizer: str = "auto"
-    fast_mode: bool = False
     hotwords: str = ""
     vocabulary: str = ""           # chosen word bank's name; "" = none
     speaker_label: str = "Speaker"
@@ -125,7 +124,7 @@ class Settings:
         bundled = paths.bundled_models_dir()
         return EngineSettings(models_dir=self.models_path(), extra_model_dirs=[bundled] if bundled else [],
                               whisper_model=self.whisper_model, device=self.device,
-                              diarizer=self.diarizer, fast_mode=self.fast_mode)
+                              diarizer=self.diarizer)
 
     def job_options(self, hotwords: str | None = None) -> JobOptions:
         """`hotwords`: the word bank's terms combined with this field's (see vocabulary.prompt_terms)."""

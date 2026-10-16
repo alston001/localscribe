@@ -25,10 +25,6 @@ from .media import SAMPLE_RATE, load_audio, mmss
 from .models import ModelStore
 from .transcript import Gap, Segment, Transcript, TWord
 
-# Punctuated text nudges Whisper to keep punctuation in fast (batched) mode, where each
-# 30 s chunk is decoded without context. Sequential mode keeps punctuation unaided.
-_PUNCTUATION_PROMPT = "Hello, and welcome. Thanks for coming in today; let's get started."
-
 
 @dataclass
 class EngineSettings:
@@ -37,7 +33,6 @@ class EngineSettings:
     whisper_model: str = "auto"
     device: str = "auto"      # auto | cuda | cpu
     diarizer: str = "auto"    # auto | pyannote | sherpa
-    fast_mode: bool = False   # batched decoding: ~3x faster, slightly less accurate
     cpu_threads: int = 0      # 0 = library default
 
 
@@ -197,25 +192,10 @@ class Engine:
     # ---- steps ---------------------------------------------------------------
     def _asr(self, audio, opts: JobOptions, device: str, report: _Reporter, cancel) -> AsrResult:
         transcriber = self._transcriber_for(device, report, cancel)
-        batch = dev.auto_batch_size(device) if self.settings.fast_mode else 1
-        prompt_hotwords = opts.hotwords.strip() or None
-        while True:
-            try:
-                report("transcribe", 0.0, self.whisper_name())
-                return transcriber.transcribe(
-                    audio, language=opts.language, batch_size=batch, hotwords=prompt_hotwords,
-                    # English only: on auto-detect an English prompt pulls other languages to English.
-                    initial_prompt=_PUNCTUATION_PROMPT if batch > 1 and opts.language == "en" else None,
-                    progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel)
-            except Cancelled:
-                raise
-            except Exception as exc:
-                if batch > 1 and "out of memory" in str(exc).lower():
-                    batch //= 2
-                    self.log(f"GPU memory full; retrying with batch size {batch}")
-                    gc.collect()
-                    continue
-                raise
+        report("transcribe", 0.0, self.whisper_name())
+        return transcriber.transcribe(
+            audio, language=opts.language, hotwords=opts.hotwords.strip() or None,
+            progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel)
 
     def _run_with_gpu_fallback(self, device: str, step: Callable[[str], T], what: str) -> tuple[T, str]:
         """step(device), retried once on the CPU when the GPU fails and the user left the
@@ -305,7 +285,7 @@ class Engine:
         transcript.warnings = warnings
         transcript.settings.update({
             "whisper_model": self.whisper_name(), "device": device,
-            "compute_type": dev.compute_type(device), "fast_mode": self.settings.fast_mode,
+            "compute_type": dev.compute_type(device),
             "diarizer": diarizer_name, "timings_s": {k: round(v, 1) for k, v in timings.items()},
         })
         self.log(f"{path.name}: {len(transcript.speakers)} speaker(s), "
