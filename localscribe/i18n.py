@@ -215,6 +215,9 @@ STRINGS: dict[str, tuple[str, str]] = {
     "warn_no_turns": ("沒有分辨出說話人，全部標成同一人。", "No speakers could be told apart, so everything is labeled as one speaker."),
     "warn_fewer_speakers": ("只分辨出 {found} 位說話人，少於指定的 {requested} 位。",
                             "Only {found} speaker(s) were found, fewer than the {requested} requested."),
+    "warn_lost_speech": ("{times} 偵測到說話聲，卻沒有轉出任何文字，請聽一下是否有遺漏。",
+                         "No text came out for {times}, although speech was detected there. "
+                         "Please listen to check whether something is missing."),
     # export headings
     "exp_source": ("原始檔案", "Source file"),
     "exp_date": ("轉錄日期", "Transcribed"),

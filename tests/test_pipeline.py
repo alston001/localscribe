@@ -25,6 +25,7 @@ class FakeTranscriber:
 
     loads: list[tuple[str, str]] = []
     words = WORDS
+    speech: list[tuple[float, float]] = []
 
     def __init__(self, path, device, compute_type, cpu_threads=0):
         self.device, self.compute_type = device, compute_type
@@ -33,7 +34,7 @@ class FakeTranscriber:
     def transcribe(self, audio, language=None, **kwargs):
         if self.device == "cuda":
             raise RuntimeError("CUDA failed with error out of memory")
-        return AsrResult(language or "en", 1.0, list(FakeTranscriber.words))
+        return AsrResult(language or "en", 1.0, list(FakeTranscriber.words), list(FakeTranscriber.speech))
 
 
 class FakePyannote:
@@ -53,7 +54,7 @@ class FakePyannote:
 @pytest.fixture
 def fake_models(tmp_path, monkeypatch):
     """A GPU machine (24 GB) with Whisper and pyannote installed, all faked."""
-    FakeTranscriber.loads, FakeTranscriber.words = [], WORDS
+    FakeTranscriber.loads, FakeTranscriber.words, FakeTranscriber.speech = [], WORDS, []
     FakePyannote.loads, FakePyannote.turns = [], [Turn(0.0, 2.0, "A"), Turn(2.5, 4.0, "B")]
     monkeypatch.setattr(pipeline, "load_audio", lambda path, **kw: np.zeros(16000 * 10, np.float32))
     monkeypatch.setattr(dev, "detect", lambda: dev.DeviceInfo(True, "Fake GPU", 24.0, "Fake CPU", 8))
@@ -278,10 +279,50 @@ def test_device_probe_failure_still_reports_hardware(monkeypatch):
     assert len(received) == 1 and received[0] is not None and received[0].cuda is False
 
 
+# ---- speech the voice detector heard but Whisper didn't write ------------------------
+def long_recording(monkeypatch, seconds=80):
+    monkeypatch.setattr(pipeline, "load_audio", lambda path, **kw: np.zeros(16000 * seconds, np.float32))
+
+
+def test_speech_without_text_warns(fake_models, monkeypatch):
+    long_recording(monkeypatch)
+    FakeTranscriber.speech = [(0.0, 4.0), (4.5, 32.0), (32.5, 60.0), (60.2, 75.0)]  # WORDS stop at 3.9 s
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == [{"key": "warn_lost_speech", "times": "0:04–1:15"}]
+    assert "0:04–1:15" in i18n.tr_in("en", **transcript.warnings[0])
+
+
+def test_silence_after_the_text_does_not_warn(fake_models, monkeypatch):
+    long_recording(monkeypatch)
+    FakeTranscriber.speech = [(0.0, 4.0)]
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == []
+
+
+def test_lost_speech_hidden_by_invented_thanks_still_warns(fake_models, monkeypatch):
+    # Split by the invented "Thank you.", neither half reaches 30 s of speech.
+    long_recording(monkeypatch)
+    FakeTranscriber.speech = [(0.0, 4.0), (4.5, 32.0), (32.5, 55.0)]
+    FakeTranscriber.words = WORDS + [Word(30.0, 30.3, " Thank", 0.15), Word(30.3, 30.6, " you.", 0.99)]
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == [{"key": "warn_lost_speech", "times": "0:04–0:55"}]
+
+
+# ---- sign-offs Whisper invents ------------------------------------------------------
+def test_invented_thank_you_is_removed(fake_models):
+    FakeTranscriber.words = WORDS[:2] + [Word(1.0, 1.2, " Thank", 0.07), Word(1.2, 1.4, " you.", 0.99)] + WORDS[2:]
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "talk.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert " ".join(s.text for s in transcript.segments) == "Hello, everyone. Thanks Sam."
+
+
 # ---- shared ------------------------------------------------------------------------
 def test_every_warning_has_both_languages():
     for key in ("err_no_speech", "warn_partial_decode", "warn_gpu_fallback", "warn_no_turns",
-                "warn_fewer_speakers", "warn_cuda_unavailable", "st_done_warn"):
+                "warn_fewer_speakers", "warn_cuda_unavailable", "warn_lost_speech", "st_done_warn"):
         assert key in i18n.STRINGS and all(i18n.STRINGS[key]), key
 
 
