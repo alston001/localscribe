@@ -84,8 +84,11 @@ STRINGS: dict[str, tuple[str, str]] = {
     "spk_range": ("人數範圍", "Between"),
     "spk_to": ("到", "and"),
     "normalize": ("平衡音量", "Even out volume"),
-    "normalize_tip": ("讓小聲和大聲的人音量接近，適合多人或離麥克風遠的錄音",
-                      "Brings quiet and loud voices closer together; helps with groups and distant mics"),
+    "normalize_tip": ("找出原始音訊聽不到的小聲語音（離麥克風遠、線上的人），只把那幾段用平衡音量後的音訊補轉；"
+                      "其餘照原始音訊轉錄，術語和換人的位置比較準",
+                      "Finds quiet voices the original audio misses (far from the mic, remote callers) and "
+                      "transcribes just those stretches from a levelled copy; the rest uses the original, which "
+                      "keeps terms and speaker changes more accurate"),
     "denoise": ("降低雜音", "Reduce noise"),
     "denoise_tip": ("減少背景雜音；錄音乾淨時建議關閉", "Reduces background noise; leave off for clean recordings"),
     "formats": ("輸出格式", "Output formats"),
