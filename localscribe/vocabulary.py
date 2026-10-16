@@ -31,6 +31,10 @@ PROMPT_LIMIT = 223
 TOKENS_PER_TERM = 4
 TOKENS_PER_CJK_CHAR = 1.5
 TOKENS_PER_MIXED_CHAR = 0.35
+# English runs get the terms in a sentence (see prompt_text); its own words take 5 tokens in
+# large-v3 and small.
+SENTENCE_START = "This recording covers "
+SENTENCE_TOKENS = 5
 
 _SEPARATORS = re.compile(r"[\n\r\t,，、]")
 _CJK = re.compile(r"[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")  # also kana, Hangul, full-width
@@ -61,8 +65,30 @@ def parse_terms(text: str) -> list[str]:
 
 
 def join_terms(terms: Iterable[str]) -> str:
-    """The hotwords text Whisper gets."""
+    """The terms as a list, for messages and for Whisper in languages other than English."""
     return ", ".join(terms)
+
+
+def prompt_text(terms: list[str], language: str | None) -> str:
+    """The hotwords text Whisper gets: for English, the terms in a sentence ("This recording
+    covers A, B, and C."), otherwise the plain list.
+
+    faster-whisper puts the hotwords where the preceding transcript would go. As a bare list
+    there, a 50-term bank made large-v3 write video credits ("Subtitles by the Amara.org
+    community") for clips of hum, music or chatter: 48 credit hits in 120 synthetic test clips,
+    against 0-2 without a bank or with the sentence, which also kept the bank's gain in accuracy.
+    Only English was measured, so other languages keep the list.
+    """
+    if not terms or language != "en":
+        return join_terms(terms)
+    if len(terms) == 1:
+        listed = terms[0]
+    elif len(terms) == 2:
+        listed = f"{terms[0]} and {terms[1]}"
+    else:
+        listed = f"{', '.join(terms[:-1])}, and {terms[-1]}"
+    text = SENTENCE_START + listed
+    return text if text.endswith((".", "!", "?")) else text + "."
 
 
 def prompt_terms(vocabulary: Vocabulary | None, hotwords: str) -> list[str]:
@@ -93,11 +119,12 @@ def replace_vocabulary(vocabularies: list[Vocabulary], old_name: str,
 
 # ---- the prompt limit -------------------------------------------------------------------
 class TokenCounter:
-    """Counts the tokens a list of terms takes in Whisper's prompt: exactly with the model's
-    tokenizer, otherwise as an estimate."""
+    """Counts the tokens a list of terms takes in Whisper's prompt, as prompt_text words them for
+    `language`: exactly with the model's tokenizer, otherwise as an estimate."""
 
-    def __init__(self, tokenizer=None):
+    def __init__(self, tokenizer=None, language: str | None = None):
         self.tokenizer = tokenizer  # a tokenizers.Tokenizer, or None to estimate
+        self.language = language    # the run's language setting: "en", "zh", "auto", ...
 
     @property
     def exact(self) -> bool:
@@ -107,9 +134,11 @@ class TokenCounter:
         if not terms:
             return 0
         if self.tokenizer is None:
-            return sum(_estimate(term) for term in terms)
+            sentence = SENTENCE_TOKENS if prompt_text(terms, self.language) != join_terms(terms) else 0
+            return sum(_estimate(term) for term in terms) + sentence
         # The same text faster-whisper encodes: " " + hotwords.strip(), no special tokens.
-        return len(self.tokenizer.encode(" " + join_terms(terms).strip(), add_special_tokens=False).ids)
+        text = " " + prompt_text(terms, self.language).strip()
+        return len(self.tokenizer.encode(text, add_special_tokens=False).ids)
 
 
 def _estimate(term: str) -> int:
@@ -127,17 +156,18 @@ def _load_tokenizer(path: str):
     return tokenizers.Tokenizer.from_file(path)
 
 
-def token_counter(store, model: str) -> TokenCounter:
-    """A counter for this Whisper model (a ModelStore name such as "large-v3"). Models don't
-    share tokenizers: small's splits some words into more pieces than large-v3's."""
+def token_counter(store, model: str, language: str | None = None) -> TokenCounter:
+    """A counter for this Whisper model (a ModelStore name such as "large-v3") and the run's
+    language. Models don't share tokenizers: small's splits some words into more pieces than
+    large-v3's."""
     folder = store.whisper_path(model) if model else None
     file = folder / "tokenizer.json" if folder else None
     if file is not None and file.is_file():
         try:
-            return TokenCounter(_load_tokenizer(str(file)))
+            return TokenCounter(_load_tokenizer(str(file)), language)
         except Exception:
             log.warning("Could not read %s for %s; estimating token counts", file.name, model, exc_info=True)
-    return TokenCounter()
+    return TokenCounter(language=language)
 
 
 def fit_terms(terms: Iterable[str], counter: TokenCounter,

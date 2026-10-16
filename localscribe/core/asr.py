@@ -97,9 +97,24 @@ def _without_words(words: list[Word], end: float) -> list[tuple[float, float]]:
     return stretches
 
 
-# Closing lines Whisper writes on its own, longest first (see drop_sign_offs).
-_SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
-              ("thanks", "for", "watching"), ("thank", "you"), ("thanks",)]
+# Closing lines Whisper writes on its own ("Thank you so much for watching"), longest first (see
+# drop_sign_offs). The ones for watching or listening may run on to the end of their sentence.
+_SIGN_OFFS = sorted({opening + middle + ending
+                     for opening in (("thank", "you"), ("thanks",))
+                     for middle in (("so", "much"), ("very", "much"), ())
+                     for ending in (("for", "watching"), ("for", "listening"), ())}, key=len, reverse=True)
+_RUN_ON = {"watching", "listening"}
+_RUN_ON_WORDS = 25
+# Credits and appeals from subtitled videos, which nobody says in a recording.
+_CREDITS = re.compile(
+    r"\b(?:sub)?titles?\s+(?:by|from)\s+(?:the\s+)?amara\.org(?:\s+community)?|\bamara\.org(?:\s+community)?"
+    r"|字幕由\s*amara\.org\s*社[区區]提供"
+    r"|\b(?:transcription|subtitles|captions)\s+by\s+castingwords\b|\bcastingwords\b"
+    r"|\btranscription\s+by\s+eso\b[.,]?(?:\s+translation\s+by\b[^.!?]*)?"
+    r"|\b(?:please\s+)?(?:don'?t\s+forget\s+to\s+)?like,?\s+(?:share,?\s+)?(?:comment,?\s+)?and\s+subscribe\b"
+    r"(?:\s+to\s+(?:our|my|the)\s+channel)?[.!]?"
+    r"|\b(?:please\s+)?subscribe\s+to\s+(?:our|my|the)\s+channel\b[.!]?",
+    re.IGNORECASE)
 
 
 def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
@@ -110,7 +125,13 @@ def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
     the first word of these (p 0.02-0.26) and sure of spoken thanks (p 0.79 or more, also
     quiet or over chatter). So a sign-off that ends a sentence and starts with a word below
     `max_p` is dropped; "Thank you for the question" goes on, so it stays.
+
+    With a word bank, such clips also came out as video credits ("Subtitles by the Amara.org
+    community", "Transcription by CastingWords") at p 0.6-1.0. Those are dropped whatever the
+    probability, and only the credit itself: speech in the same clip stays. With the bank sent
+    as a sentence, the sign-off became "Thank you for listening.", sometimes running on.
     """
+    words = _drop_credits(words)
     kept, i = [], 0
     while i < len(words):
         length = _sign_off_length(words, i) if words[i].prob < max_p else 0
@@ -123,12 +144,37 @@ def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
 
 
 def _sign_off_length(words: list[Word], i: int) -> int:
+    def ends_sentence(k: int) -> bool:
+        return words[k].text.rstrip().endswith((".", "!", "?"))
+
     for phrase in _SIGN_OFFS:
         span = words[i:i + len(phrase)]
-        if (len(span) == len(phrase) and span[-1].text.rstrip().endswith((".", "!", "?"))
-                and tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) == phrase):
-            return len(phrase)
+        if len(span) < len(phrase) or tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) != phrase:
+            continue
+        end = i + len(phrase)  # one past the sign-off's last word
+        if phrase[-1] in _RUN_ON:
+            while not ends_sentence(end - 1) and end < len(words) and end - i < _RUN_ON_WORDS:
+                end += 1
+        if ends_sentence(end - 1):
+            return end - i
     return 0
+
+
+def _drop_credits(words: list[Word]) -> list[Word]:
+    """`words` without the ones a _CREDITS match covers in their joined text."""
+    text = "".join(w.text for w in words)
+    covered = [False] * len(text)
+    for match in _CREDITS.finditer(text):
+        covered[match.start():match.end()] = [True] * (match.end() - match.start())
+    if not any(covered):
+        return words
+    kept, start = [], 0
+    for word in words:
+        end = start + len(word.text)
+        if not any(covered[k] and not text[k].isspace() for k in range(start, end)):
+            kept.append(word)
+        start = end
+    return kept
 
 
 def speech_clips(audio: np.ndarray, threshold: float = 0.2, max_len: float = 28.0,
@@ -179,22 +225,20 @@ class Transcriber:
 
             # The pipeline's own defaults, spelled out so `speech` holds the regions it decodes.
             vad = VadOptions(max_speech_duration_s=30, min_silence_duration_ms=160)
-            segments, info = BatchedInferencePipeline(self.model).transcribe(
+            found, info = BatchedInferencePipeline(self.model).transcribe(
                 audio, batch_size=batch_size, vad_filter=True, vad_parameters=vad, **options)
+            segments = ((seg, min(seg.end / duration, 1.0)) for seg in found)
             speech = [(r["start"] / SAMPLE_RATE, r["end"] / SAMPLE_RATE)
                       for r in get_speech_timestamps(audio, vad)]
         else:
             clips = speech_clips(audio)
             if not clips:
                 return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
-            # Without conditioning, one misheard phrase cannot snowball into a repetition loop.
-            segments, info = self.model.transcribe(
-                audio, vad_filter=False, clip_timestamps=[t for clip in clips for t in clip],
-                condition_on_previous_text=False, **options)
+            segments, info = self._decode_clips(audio, clips, options)
             speech = list(clips)
 
         words: list[Word] = []
-        for seg in segments:  # generator: decoding happens while iterating
+        for seg, done in segments:  # generator: decoding happens while iterating
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             if seg.words:
@@ -203,6 +247,41 @@ class Transcriber:
             elif seg.text.strip():
                 words.append(Word(float(seg.start), float(seg.end), " " + seg.text.strip(), 0.5))
             if progress is not None and duration > 0:
-                progress(min(seg.end / duration, 1.0))
+                progress(done)
         words.sort(key=lambda w: w.start)
         return AsrResult(info.language, float(info.language_probability), words, speech)
+
+    def _decode_clips(self, audio: np.ndarray, clips: list[tuple[float, float]], options: dict):
+        """(segments, each with the share of the speech decoded so far, info). Every clip is decoded
+        on its own and without conditioning, so one misheard phrase cannot snowball into a
+        repetition loop.
+
+        A clip that starts where the previous one ended was cut out of running speech and begins
+        mid-sentence. With hotwords (a word bank), Whisper dropped the first words of 8 of 162 such
+        synthetic clips, against none without, so those clips are decoded without them.
+        """
+        cut = {i for i in range(1, len(clips)) if clips[i][0] - clips[i - 1][1] < 0.1}
+        groups = [[c for i, c in enumerate(clips) if i not in cut], [c for i, c in enumerate(clips) if i in cut]]
+        if not options["hotwords"] or not groups[1]:
+            groups = [clips, []]
+        total = sum(end - start for start, end in clips)
+
+        def decode(group: list[tuple[float, float]], opts: dict):
+            return self.model.transcribe(audio, vad_filter=False, clip_timestamps=[t for c in group for t in c],
+                                         condition_on_previous_text=False, **opts)
+
+        first, info = decode(groups[0], options)
+
+        def segments():
+            done = 0.0
+            for group, found in ((groups[0], first), (groups[1], None)):
+                if not group:
+                    continue
+                if found is None:  # with the language already detected, so both decodes agree
+                    found, _ = decode(group, {**options, "hotwords": None, "language": info.language})
+                for seg in found:
+                    covered = sum(max(0.0, min(end, seg.end) - start) for start, end in group)
+                    yield seg, min((done + covered) / total, 1.0)
+                done += sum(end - start for start, end in group)
+
+        return segments(), info

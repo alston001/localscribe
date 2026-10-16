@@ -12,7 +12,8 @@ import pytest
 
 from localscribe import paths
 from localscribe.vocabulary import (PROMPT_LIMIT, TokenCounter, Vocabulary, fit_terms, join_terms,
-                                    load_vocabularies, parse_terms, save_vocabularies, token_counter)
+                                    load_vocabularies, parse_terms, prompt_text, save_vocabularies,
+                                    token_counter)
 from test_pipeline import WORDS, FakeTranscriber, fake_models, make_engine  # noqa: F401 (fake_models: fixture)
 
 NLP = Vocabulary("Zorblax seminar", ["Quuxian parsing", "Vexley drift", "glimmerform"])
@@ -234,15 +235,30 @@ def test_counts_the_exact_text_faster_whisper_encodes():
     assert tokenizer.seen == [(" Quuxian parsing, Vexley drift", False)]
 
 
+def test_counts_the_sentence_english_runs_send():
+    tokenizer = CharTokenizer()
+    counter = TokenCounter(tokenizer, language="en")
+    text = " This recording covers Quuxian parsing and Vexley drift."
+    assert counter.count(["Quuxian parsing", "Vexley drift"]) == len(text)
+    assert tokenizer.seen == [(text, False)]
+
+
 def test_no_terms_take_no_tokens():
     assert TokenCounter(CharTokenizer()).count([]) == 0
     assert TokenCounter().count([]) == 0
+    assert TokenCounter(CharTokenizer(), language="en").count([]) == TokenCounter(language="en").count([]) == 0
 
 
 def test_without_a_tokenizer_four_tokens_per_term_are_estimated():
     counter = TokenCounter()
     assert not counter.exact
     assert counter.count(made_up_terms(3)) == 12
+
+
+def test_the_estimate_counts_the_sentence_too():
+    # " This recording covers", ", and" and the full stop take 5 tokens in large-v3 and in small.
+    assert TokenCounter(language="en").count(made_up_terms(3)) == 12 + 5
+    assert TokenCounter(language="zh").count(made_up_terms(3)) == 12
 
 
 def test_chinese_terms_are_estimated_by_character():
@@ -292,6 +308,8 @@ def test_the_chosen_models_own_tokenizer_is_used(tmp_path):
     write_tokenizer(tmp_path / "whisper" / "small")
     counter = token_counter(ModelStore(tmp_path), "small")
     assert counter.exact and counter.count(["Zorblax one", "Quuxian"]) == 4  # Zorblax, one, ",", Quuxian
+    english = token_counter(ModelStore(tmp_path), "small", "en")  # This recording covers ... and Quuxian .
+    assert english.exact and english.count(["Zorblax one", "Quuxian"]) == 8
 
 
 def test_other_models_tokenizers_are_not_borrowed(tmp_path):
@@ -361,6 +379,13 @@ def test_a_term_cut_in_half_counts_as_dropped():
     assert kept == ["abcd"] and dropped == ["efgh", "ij"]
 
 
+def test_the_sentence_counts_against_the_limit():
+    # " This recording covers ab and cd." is 33 characters; with ef it would be 38.
+    kept, dropped = fit_terms(["ab", "cd", "ef"], TokenCounter(CharTokenizer(), language="en"), limit=33)
+    assert kept == ["ab", "cd"] and dropped == ["ef"]
+    assert fit_terms(["ab", "cd", "ef"], TokenCounter(CharTokenizer()), limit=33) == (["ab", "cd", "ef"], [])
+
+
 def test_one_huge_term_is_dropped_whole():
     kept, dropped = fit_terms(["x" * 300], TokenCounter(CharTokenizer()))
     assert kept == [] and dropped == ["x" * 300]
@@ -372,8 +397,9 @@ def installed_tokenizers():
 
 
 @pytest.mark.skipif(not installed_tokenizers(), reason="no Whisper model downloaded")
+@pytest.mark.parametrize("language", ["en", "zh"])
 @pytest.mark.parametrize("file", installed_tokenizers(), ids=lambda f: f.parent.name)
-def test_counts_match_what_faster_whisper_sends(file):
+def test_counts_match_what_faster_whisper_sends(file, language):
     import tokenizers
     from faster_whisper.tokenizer import Tokenizer
     from faster_whisper.transcribe import WhisperModel
@@ -383,16 +409,17 @@ def test_counts_match_what_faster_whisper_sends(file):
 
     def sent(terms):  # the hotword tokens get_prompt puts between <|startofprev|> and <|startoftranscript|>
         prompt = WhisperModel.get_prompt(types.SimpleNamespace(max_length=448), whisper, [],
-                                         hotwords=join_terms(terms))
+                                         hotwords=prompt_text(terms, language))
         return prompt[1:prompt.index(whisper.sot)]
 
     terms = [f"Zorblax{i} tokenization" for i in range(70)] + ["佐布拉克", "Dr. Fennimore"] * 5  # far over
-    counter = TokenCounter(hf)
+    counter = TokenCounter(hf, language)
     kept, dropped = fit_terms(terms, counter)
     assert dropped and counter.count(kept) <= PROMPT_LIMIT < counter.count(kept + dropped[:1])
     assert len(sent(kept)) == counter.count(kept)          # under the limit: nothing cut
     assert len(sent(terms)) == PROMPT_LIMIT                # over it: cut to 223 tokens
-    assert sent(terms)[:len(sent(kept))] == sent(kept)     # the kept terms are what survived whole
+    if language != "en":  # a sentence ends differently once its last terms are cut off
+        assert sent(terms)[:len(sent(kept))] == sent(kept)  # the kept terms are what survived whole
 
 
 # ---- the terms Whisper gets ---------------------------------------------------------
@@ -408,6 +435,25 @@ def test_without_a_word_bank_the_field_is_used_alone():
 
     assert join_terms(prompt_terms(None, " Dr. Fennimore ,Plonk assay")) == "Dr. Fennimore, Plonk assay"
     assert prompt_terms(None, "") == []
+
+
+def test_english_runs_get_the_terms_in_a_sentence():
+    # As a bare list in Whisper's previous-text slot, a bank made large-v3 write video credits
+    # ("Subtitles by the Amara.org community") on clips without speech; as a sentence it didn't.
+    assert prompt_text(["Quuxian parsing", "Vexley drift", "glimmerform"], "en") == (
+        "This recording covers Quuxian parsing, Vexley drift, and glimmerform.")
+    assert prompt_text(["Quuxian parsing", "Vexley drift"], "en") == (
+        "This recording covers Quuxian parsing and Vexley drift.")
+    assert prompt_text(["glimmerform"], "en") == "This recording covers glimmerform."
+    assert prompt_text(["Plonk Inc."], "en") == "This recording covers Plonk Inc."  # no second full stop
+    assert prompt_text([], "en") == ""
+
+
+def test_other_languages_get_the_plain_list():
+    # Only English was measured; other languages and detection send the list as before.
+    terms = ["Quuxian parsing", "佐布拉克"]
+    assert prompt_text(terms, "zh") == prompt_text(terms, "auto") == prompt_text(terms, None) == (
+        "Quuxian parsing, 佐布拉克")
 
 
 def test_word_banks_are_found_by_name_in_any_letter_case():
@@ -461,7 +507,8 @@ def test_start_anyway_sends_only_the_terms_that_fit():
     from localscribe.ui.main_window import MainWindow
 
     window, bank, typed = over_the_limit(answer=True)
-    assert MainWindow._terms_for_run(window, ask=True) == (join_terms(bank.terms + typed[:5]), "Zorblax seminar")
+    assert MainWindow._terms_for_run(window, ask=True) == (prompt_text(bank.terms + typed[:5], "en"),
+                                                           "Zorblax seminar")
 
 
 def test_an_estimate_asks_but_lets_whisper_keep_what_really_fits():
@@ -469,7 +516,7 @@ def test_an_estimate_asks_but_lets_whisper_keep_what_really_fits():
     from localscribe.ui.main_window import MainWindow
 
     window, bank, typed = over_the_limit(answer=True, counter=TokenCounter())
-    assert MainWindow._terms_for_run(window, ask=True) == (join_terms(bank.terms + typed), "Zorblax seminar")
+    assert MainWindow._terms_for_run(window, ask=True) == (prompt_text(bank.terms + typed, "en"), "Zorblax seminar")
     assert window.asked == [(typed[5:], False)]
 
 
@@ -479,8 +526,26 @@ def test_no_question_when_everything_fits():
 
     window = fake_window([NLP], Settings(vocabulary="zorblax seminar", hotwords="Dr. Fennimore"))
     assert MainWindow._terms_for_run(window, ask=True) == (
-        "Quuxian parsing, Vexley drift, glimmerform, Dr. Fennimore", "Zorblax seminar")
+        "This recording covers Quuxian parsing, Vexley drift, glimmerform, and Dr. Fennimore.", "Zorblax seminar")
     assert window.asked == []
+
+
+def test_a_run_in_another_language_sends_the_plain_list():
+    from localscribe.config import Settings
+    from localscribe.ui.main_window import MainWindow
+
+    window = fake_window([NLP], Settings(language="zh", vocabulary="Zorblax seminar", hotwords="Dr. Fennimore"))
+    assert MainWindow._terms_for_run(window, ask=True)[0] == "Quuxian parsing, Vexley drift, glimmerform, Dr. Fennimore"
+
+
+def test_the_check_counts_exactly_the_text_whisper_gets():
+    from localscribe.config import Settings
+    from localscribe.ui.main_window import MainWindow
+
+    counter = TokenCounter(CharTokenizer(), language="en")
+    window = fake_window([NLP], Settings(vocabulary="Zorblax seminar", hotwords="Dr. Fennimore"), counter=counter)
+    hotwords, _ = MainWindow._terms_for_run(window, ask=True)
+    assert counter.count([*NLP.terms, "Dr. Fennimore"]) == len(" " + hotwords)
 
 
 def test_a_deleted_word_bank_is_not_used():
@@ -496,7 +561,7 @@ def test_files_added_during_a_run_are_not_asked_about_again():
 
     window, bank, typed = over_the_limit(answer=False)
     hotwords, name = MainWindow._terms_for_run(window, ask=False)
-    assert window.asked == [] and hotwords.endswith("Plonk3") and name == "Zorblax seminar"
+    assert window.asked == [] and hotwords.endswith("and Plonk3.") and name == "Zorblax seminar"
 
 
 def test_the_count_waits_for_the_gpu_check_when_the_model_is_automatic():
@@ -508,7 +573,8 @@ def test_the_count_waits_for_the_gpu_check_when_the_model_is_automatic():
 
     window = types.SimpleNamespace(settings=Settings(whisper_model="auto"), device_info=None,
                                    engine=types.SimpleNamespace(whisper_name=not_yet))
-    assert not MainWindow._token_counter(window).exact
+    counter = MainWindow._token_counter(window)
+    assert not counter.exact and counter.language == "en"  # still counts the sentence an English run sends
 
 
 def test_the_count_uses_the_model_that_will_run(tmp_path):
@@ -518,8 +584,10 @@ def test_the_count_uses_the_model_that_will_run(tmp_path):
 
     write_tokenizer(tmp_path / "whisper" / "small")
     engine = types.SimpleNamespace(store=ModelStore(tmp_path), whisper_name=lambda: "small")
-    window = types.SimpleNamespace(settings=Settings(whisper_model="auto"), device_info=object(), engine=engine)
-    assert MainWindow._token_counter(window).exact
+    window = types.SimpleNamespace(settings=Settings(whisper_model="auto", language="zh"), device_info=object(),
+                                   engine=engine)
+    counter = MainWindow._token_counter(window)
+    assert counter.exact and counter.language == "zh"
 
 
 class FakeWorker:
@@ -571,7 +639,7 @@ def test_every_queued_file_gets_the_word_bank(monkeypatch, tmp_path):
     assert window.calls == ["settings", "count"]  # the model that will run is known before counting
     assert window.worker.started and len(window.worker.tasks) == 2
     for task in window.worker.tasks:
-        assert task.options.hotwords == join_terms(bank.terms + typed[:5])
+        assert task.options.hotwords == prompt_text(bank.terms + typed[:5], "en")
         assert task.vocabulary == "Zorblax seminar"
 
 
@@ -779,7 +847,7 @@ def test_a_run_uses_the_word_banks_as_saved_now(monkeypatch, tmp_path):
     window._token_counter = lambda: TokenCounter(FourPerTerm())
     window._reload_vocabularies = lambda: MainWindow._reload_vocabularies(window)
     save_vocabularies([Vocabulary("Zorblax seminar", ["Plonk assay"])])
-    assert MainWindow._terms_for_run(window, ask=True) == ("Plonk assay", "Zorblax seminar")
+    assert MainWindow._terms_for_run(window, ask=True) == ("This recording covers Plonk assay.", "Zorblax seminar")
 
 
 def test_an_unreadable_file_keeps_this_windows_word_banks(monkeypatch, tmp_path, caplog):
@@ -834,14 +902,20 @@ def test_cli_word_bank_terms_come_before_hotwords(monkeypatch, tmp_path):
     code, written = run_cli(monkeypatch, tmp_path, "--vocabulary", "zorblax SEMINAR",
                             "--hotwords", "Dr. Fennimore, glimmerform")
     assert code == 0
-    assert FakeEngine.runs[0].hotwords == "Quuxian parsing, Vexley drift, glimmerform, Dr. Fennimore"
+    assert FakeEngine.runs[0].hotwords == (
+        "This recording covers Quuxian parsing, Vexley drift, glimmerform, and Dr. Fennimore.")
     assert written[0].settings["vocabulary"] == "Zorblax seminar"
 
 
 def test_cli_hotwords_alone_still_work(monkeypatch, tmp_path):
     code, written = run_cli(monkeypatch, tmp_path, "--hotwords", "Dr. Fennimore,glimmerform")
-    assert code == 0 and FakeEngine.runs[0].hotwords == "Dr. Fennimore, glimmerform"
+    assert code == 0 and FakeEngine.runs[0].hotwords == "This recording covers Dr. Fennimore and glimmerform."
     assert "vocabulary" not in written[0].settings
+
+
+def test_cli_other_languages_send_the_plain_list(monkeypatch, tmp_path):
+    code, _ = run_cli(monkeypatch, tmp_path, "--hotwords", "Dr. Fennimore,glimmerform", "-l", "zh")
+    assert code == 0 and FakeEngine.runs[0].hotwords == "Dr. Fennimore, glimmerform"
 
 
 def test_cli_unknown_word_bank_is_a_usage_error(monkeypatch, tmp_path, capsys):
@@ -866,21 +940,23 @@ def test_cli_unreadable_word_banks_are_a_usage_error(monkeypatch, tmp_path, caps
 
 
 def test_cli_says_which_terms_are_left_out(monkeypatch, tmp_path, capsys):
-    # One token per word and comma: 112 one-word terms take 223 tokens.
+    # One token per word and punctuation mark: "This recording covers", 109 one-word terms, 108
+    # commas, "and" and the full stop take 222 tokens.
     write_tokenizer(tmp_path / "models" / "whisper" / "large-v3")
     save_vocabularies([Vocabulary("Zorblax seminar", made_up_terms(120))], tmp_path / "vocabularies.json")
     code, _ = run_cli(monkeypatch, tmp_path, "--vocabulary", "Zorblax seminar")
     warning = next(line for line in capsys.readouterr().out.splitlines() if "left out" in line)
-    assert code == 0 and "8 term(s)" in warning and warning.endswith(join_terms(made_up_terms(120)[112:]))
-    assert FakeEngine.runs[0].hotwords == join_terms(made_up_terms(112))
+    assert code == 0 and "11 term(s)" in warning and warning.endswith(join_terms(made_up_terms(120)[109:]))
+    assert FakeEngine.runs[0].hotwords == prompt_text(made_up_terms(109), "en")
 
 
 def test_cli_estimate_warns_but_keeps_every_term(monkeypatch, tmp_path, capsys):
     save_vocabularies([Vocabulary("Zorblax seminar", made_up_terms(60))], tmp_path / "vocabularies.json")
     code, _ = run_cli(monkeypatch, tmp_path, "--vocabulary", "Zorblax seminar")
     warning = next(line for line in capsys.readouterr().out.splitlines() if "estimate" in line)
-    assert code == 0 and "may" in warning and warning.endswith(join_terms(made_up_terms(60)[55:]))
-    assert FakeEngine.runs[0].hotwords == join_terms(made_up_terms(60))
+    # 4 tokens a term and 5 for the sentence: 54 terms take 221.
+    assert code == 0 and "may" in warning and warning.endswith(join_terms(made_up_terms(60)[54:]))
+    assert FakeEngine.runs[0].hotwords == prompt_text(made_up_terms(60), "en")
 
 
 # ---- the picker and the editor, in a real (offscreen) Qt ----------------------------

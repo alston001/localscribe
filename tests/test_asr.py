@@ -45,10 +45,59 @@ def test_spoken_thanks_are_kept():
         assert drop_sign_offs(words) == words
 
 
+def test_sign_offs_about_listening_are_dropped_too():
+    # With a word bank sent as a sentence, the sign-off on hum and music became "Thank you for
+    # listening." (p 0.16-0.17 for "Thank"), and once it ran on into far-off chatter.
+    assert drop_sign_offs(say((" Thank", 0.16), (" you", 1.0), (" for", 0.06), (" listening.", 0.32))) == []
+    assert drop_sign_offs(say((" Thanks", 0.2), (" for", 0.5), (" listening!", 0.6))) == []
+    words = say((" on.", 1.0), (" Thank", 0.08), (" you", 0.99), (" for", 0.08), (" listening", 0.41), (" to", 0.42),
+                (" the", 0.24), (" Thursday", 0.45), (" afternoon.", 0.96))
+    assert text(drop_sign_offs(words)) == " on."
+
+
+def test_longer_sign_offs_are_dropped_to_the_end_of_their_sentence():
+    # From a second set of test clips, with and without a word bank.
+    words = say((" Thank", 0.18), (" you", 0.99), (" so", 0.32), (" much", 1.0), (" for", 0.37), (" watching,", 0.74),
+                (" and", 0.67), (" we'll", 0.6), (" see", 0.94), (" you", 1.0), (" on", 0.57), (" the", 0.86),
+                (" next", 0.71), (" one.", 0.35))
+    assert drop_sign_offs(words) == []
+    words = say(*[(" Thank", 0.13), (" you", 0.99), (" for", 0.3), (" listening", 0.44)]
+                + [(f" {w}", 0.5) for w in "to my lecture on how to skip the next part of the budget.".split()])
+    assert drop_sign_offs(words) == []
+
+
+def test_sure_thanks_that_run_on_are_kept():
+    words = say((" Thank", 0.9), (" you", 1.0), (" for", 0.9), (" listening,", 0.9), (" and", 0.9), (" the", 0.9),
+                (" essay", 0.9), (" is", 0.9), (" due", 0.9), (" Friday.", 0.9))
+    assert drop_sign_offs(words) == words
+
+
 def test_thanks_that_go_on_are_kept():
     # Not a sign-off, even when Whisper is unsure of the first word.
     words = say((" Thank", 0.3), (" you", 0.9), (" for", 0.9), (" the", 0.9), (" question.", 0.9))
     assert drop_sign_offs(words) == words
+
+
+def test_video_credits_are_dropped_however_sure_whisper_is():
+    # With a word bank, hum, music or far-off chatter came out as these at p 0.6-1.0. Only the
+    # credit goes: the lecture that follows in the same clip stays.
+    words = say((" Subtitles", 0.62), (" by", 0.94), (" the", 0.86), (" Amara", 1.0), (".org", 1.0),
+                (" community", 1.0), (" Byte", 0.18), (" pair", 0.03), (" encoding", 0.99), (" starts.", 1.0))
+    assert text(drop_sign_offs(words)) == " Byte pair encoding starts."
+    assert drop_sign_offs(say((" Transcription", 0.38), (" by", 1.0), (" CastingWords", 0.93))) == []
+    assert drop_sign_offs(say((" Transcription", 0.32), (" by", 0.97), (" ESO.", 0.61), (" Translation", 1.0),
+                              (" by", 1.0), (" �", 0.99))) == []
+    words = say((" Okay.", 0.9), (" Please", 0.6), (" like,", 0.9), (" share,", 0.9), (" and", 0.9),
+                (" subscribe", 0.9), (" to", 0.9), (" our", 0.9), (" channel!", 0.9))
+    assert text(drop_sign_offs(words)) == " Okay."
+
+
+def test_sentences_that_only_look_like_credits_are_kept():
+    for words in (say((" Transcription", 0.9), (" by", 0.9), (" hand", 0.9), (" is", 0.9), (" slow.", 0.9)),
+                  say((" Please", 0.9), (" subscribe", 0.9), (" to", 0.9), (" the", 0.9), (" mailing", 0.9),
+                      (" list.", 0.9)),
+                  say((" I'd", 0.9), (" like", 0.9), (" to", 0.9), (" share", 0.9), (" this.", 0.9))):
+        assert drop_sign_offs(words) == words
 
 
 # ---- lost speech -------------------------------------------------------------------
@@ -157,6 +206,34 @@ def test_transcribe_reports_where_it_heard_speech(monkeypatch):
     transcriber = fake_transcriber(monkeypatch, clips)
     result = transcriber.transcribe(np.zeros(16000 * 45, np.float32), language="en")
     assert result.speech == clips
+
+
+def test_clips_cut_out_of_running_speech_go_without_the_word_bank(monkeypatch):
+    # A clip that starts where the previous one ended begins mid-sentence. With a word bank,
+    # Whisper dropped the first words of 8 of 162 such test clips; without one, of none.
+    clips = [(1.0, 28.0), (28.0, 55.0), (56.5, 80.0), (80.0, 99.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    result = transcriber.transcribe(np.zeros(16000 * 100, np.float32), language="en", hotwords="Quuxian, Vexley")
+    calls = [options for _, options in transcriber.model.calls]
+    assert [(c["clip_timestamps"], c["hotwords"]) for c in calls] == [
+        ([1.0, 28.0, 56.5, 80.0], "Quuxian, Vexley"), ([28.0, 55.0, 80.0, 99.0], None)]
+    assert len(result.words) == 4 and result.speech == clips  # both decodes' words, all the speech
+
+
+def test_without_a_word_bank_all_clips_go_in_one_decode(monkeypatch):
+    clips = [(1.0, 28.0), (28.0, 55.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    transcriber.transcribe(np.zeros(16000 * 60, np.float32), language="en")
+    assert [options["clip_timestamps"] for _, options in transcriber.model.calls] == [[1.0, 28.0, 28.0, 55.0]]
+
+
+def test_the_second_decode_keeps_the_detected_language_and_progress_only_grows(monkeypatch):
+    clips = [(1.0, 28.0), (28.0, 55.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    seen = []
+    transcriber.transcribe(np.zeros(16000 * 60, np.float32), language=None, hotwords="Quuxian", progress=seen.append)
+    assert [options["language"] for _, options in transcriber.model.calls] == [None, "en"]
+    assert seen == sorted(seen) and seen[-1] <= 1.0
 
 
 def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
