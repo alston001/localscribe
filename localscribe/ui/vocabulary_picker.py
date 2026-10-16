@@ -79,6 +79,9 @@ class _RowDelegate(QStyledItemDelegate):
             painter.fillRect(rect, QColor("#DBEAFE"))
         elif option.state & QStyle.State_MouseOver:
             painter.fillRect(rect, QColor(style.WINDOW))
+        # Measure and draw in the same font: on Windows, item views get 9 pt while the viewport
+        # keeps the app's 10 pt, which cut the "1" off "16 term(s)".
+        painter.setFont(option.font)
         text = rect.adjusted(10, 0, -8, 0)
         if name:
             buttons = self.button_rects(rect)
@@ -88,7 +91,7 @@ class _RowDelegate(QStyledItemDelegate):
             width = option.fontMetrics.horizontalAdvance(count)
             count_box = QRect(buttons["edit"].left() - 6 - width, rect.top(), width, rect.height())
             painter.setPen(QColor(style.MUTED))
-            painter.drawText(count_box, Qt.AlignVCenter | Qt.AlignRight, count)
+            painter.drawText(count_box, Qt.AlignVCenter | Qt.AlignRight | Qt.TextDontClip, count)
             text.setRight(count_box.left() - 10)
         font = QFont(option.font)
         font.setBold(name.casefold() == self.current)

@@ -1002,6 +1002,37 @@ saving = VocabularyEditor(None, [], TokenCounter(), on_save=lambda v: "")
 saving.txt_name.setText("Glimmer studies")
 saving.accept()
 out["save_ok"] = saving.result()
+
+# Windows gives item views their own 9 pt font, while the list's viewport keeps the app's 10 pt.
+# Measured in one and drawn in the other, "16 term(s)" lost its "1". A row must look the same
+# whatever font the viewport has.
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QFont, QFontMetrics, QImage, QPainter, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+from localscribe.ui import vocabulary_picker as vp
+
+row_model = QStandardItemModel()
+item = QStandardItem("Zorblax seminar")
+item.setData("Zorblax seminar", vp._NAME)
+item.setData("16 term(s)", vp._COUNT)
+row_model.appendRow(item)
+delegate = vp._RowDelegate("")
+
+def render_row(viewport_font):
+    image = QImage(320, 31, QImage.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    painter.setFont(viewport_font)
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 320, 31)
+    option.font = QFont("Segoe UI", 9)
+    option.fontMetrics = QFontMetrics(option.font)
+    option.state = QStyle.State_Enabled
+    delegate.paint(painter, option, row_model.index(0, 0))
+    painter.end()
+    return image
+
+out["same_row_any_viewport_font"] = render_row(QFont("Segoe UI", 10)) == render_row(QFont("Segoe UI", 20))
 print(json.dumps(out))
 '''
 
@@ -1041,3 +1072,4 @@ def test_picker_and_editor():
     assert out["edit"] == ["Edit word bank", "Lab meeting", "Plonk assay", True]
     assert out["save_failed"] == [0, "Disk full", "glimmerform", ["Glimmer studies"]]  # still open, nothing lost
     assert out["save_ok"] == 1
+    assert out["same_row_any_viewport_font"]  # the term count isn't cut off on Windows
