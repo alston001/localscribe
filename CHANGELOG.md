@@ -7,6 +7,13 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 ### Word banks
 
 - **Word banks for technical terms.** Whisper often mishears jargon, for example writing "tokenization" as "organization". Keep a short list of terms for each course or topic, and pick it in the main window's new **Word bank** menu before you start; the menu is searchable and can create, edit and delete banks. The bank's terms come first, then those in **Settings › Names and terms**. Whisper reads only the first 223 tokens of these terms, about 55 English terms. The editor counts them as you type, and before a run LocalScribe lists any terms that would be left out, instead of letting Whisper drop them silently. Terms in a bank make Whisper more likely to hear them, so keep each bank to the course at hand. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json`, `_transcript.json` records which bank was used, and the command line takes `--vocabulary NAME`.
+- **Word banks without side effects.** A bank's terms reach Whisper where the preceding transcript would go. Sent as a bare list, they made Whisper write video credits ("Subtitles by the Amara.org community") in pauses, and skip the first words of some clips. Four changes prevent this:
+  - For English recordings the terms now go as one sentence ("This recording covers …").
+  - Credit lines and invented sign-offs are removed.
+  - Where the text with a bank starts or ends more than 1.5 s inside detected speech, or a stretch comes out empty, that part is transcribed again without the bank.
+  - A piece cut out of running speech, which begins mid-sentence, is transcribed without the bank.
+
+  On a real 78-minute lecture, run twice with and twice without a bank, misheard terms fell from 16 to 5. No credit lines or leaked term lists appeared, and nothing was missing that the runs without a bank had. Transcription took about 45% longer with the bank (about a third longer overall). The sentence takes 5 of Whisper's 223 tokens, and the editor and the check before a run count it. Fast mode doesn't have the re-check yet, so there a bank can still drop the first words of a clip.
 
 ### Proofreading aids
 
@@ -60,13 +67,19 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 
 - `packaging\make_zip.py [dist folder]` takes the build folder (for example `dist_build`) and checks that `LocalScribe.exe` is in it.
 - `.gitignore` covers recordings and transcripts in every folder, not just the project root, plus partial downloads, logs and `.env`.
-- The test suite grew from 20 to 282 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
+- The test suite grew from 20 to 306 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
 
 ### 中文摘要
 
 以下是 0.1.1 之後的變更，來自程式碼審查與實機測試，尚未發佈。
 
-- **詞庫**：主視窗新增「詞庫」選單，可以為每門課或每個主題建一份專有名詞清單，開始前選好，Whisper 比較不會聽錯，例如把 tokenization 寫成 organization。Whisper 最多只讀約 55 個英文詞，超過時開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`。
+- **詞庫**：主視窗新增「詞庫」選單，可以為每門課或每個主題建一份專有名詞清單，開始前選好，Whisper 比較不會聽錯，例如把 tokenization 寫成 organization。Whisper 最多只讀約 55 個英文詞，超過時開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`。詞庫原本會讓 Whisper 在停頓處寫出影片字幕致謝，並跳過部分片段的開頭，現在都已處理：
+  - 英文錄音改用一句話交出詞庫；
+  - 致謝句和憑空結尾語會刪除；
+  - 用詞庫轉出的文字如果比語音晚開始或早結束 1.5 秒以上，那一段會不帶詞庫重轉；
+  - 從句子中間開始的片段也不用詞庫。
+
+  在一份 78 分鐘的真實課堂錄音上（用與不用詞庫各跑兩次），術語錯誤從 16 降到 5，沒有致謝句或詞表外洩，也沒有比不用詞庫多漏語音。代價是轉錄慢約 45%。快速模式還沒有這項重新檢查。
 - **標記不確定的字詞**（預設關閉，命令列用 `--mark-uncertain`）：Whisper 把握低於 40% 的字，Word 以黃色標示，txt 和 md 在字後加 (?)，Excel 和 CSV 多一欄列出；字幕不標記。在乾淨和有回音的合成測試錄音中，約每 100 個字標出 1 個，其中一半以上真的聽錯。很有把握卻聽錯的字（例如把 tokenization 聽成 organization）不會被標出，所以要和詞庫、校對一起用。
 - **空白段標註**：30 秒以上沒有轉出文字的地方，txt、md 和 Word 會寫上「[沒有轉出文字 00:40:30–00:42:05]」；偵測到 30 秒以上的說話聲卻沒有文字時，寫「[偵測到語音，但沒有轉出文字 …]」，請回去聽是否漏掉內容。字幕和試算表從時間就看得出空白，不加標記。舊版的 `_transcript.json` 仍可讀取。
 - **長時間停頓會換段**：停頓超過 10 秒就開新段落，即使 Whisper 沒有加句號，時間戳記也看得出空白。
@@ -77,7 +90,7 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 - **逐字稿**：Whisper 憑空寫出、單獨成句、而且把握不到 50% 的「Thank you.」類結尾語會被刪除。換人點只差句首或句尾 1–2 個字時，整句歸給同一個人，換人點會落在句尾或停頓處。`_transcript.json` 可供日後的校對編輯器使用：較新版本的檔案會明確拒絕而不是遺失資料，存檔失敗不會毀掉舊檔。文字修改過後，字幕和試算表以修改後的文字為準。快速模式的英文標點提示只在語言設為英文時使用。
 - **穩定性**：工作執行中關閉視窗會先等它停止，太久會提示並保持開啟，不再當掉。轉檔時按 Esc 等於「取消」，視窗保留並顯示「已停止」。背景錯誤會記錄並跳出提示。輸出檔全部寫完才放到目的地，失敗不留半成品。模型下載遇到伺服器忙碌會重試。損毀的 `settings.json` 會備份成 `settings.json.bad`。`--speakers` 會拒絕 `2-`、`3-1`、`0` 這類值。`.ts` 不再被當成媒體檔。關閉提示改為「正在轉錄中」。
 - **隱私與安全**：`_transcript.json` 和 Excel 只記錄檔名，不記錄資料夾；記錄檔也只寫檔名。下載的模型會核對 SHA-256，token 只透過 https 傳送。ffmpeg 只讀本機檔案，檔案標籤無法偽造長度。CSV 與 Excel 中以 `=`、`+`、`-`、`@` 開頭的內容會加上 `'`，不會被當成公式執行。
-- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 282 個。
+- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 306 個。
 
 ## 0.1.1
 
