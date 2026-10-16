@@ -182,16 +182,20 @@ class FakeWord:
 
 
 class FakeModel:
-    """Stands in for faster_whisper.WhisperModel: one segment per call, at the start of the audio."""
+    """Stands in for faster_whisper.WhisperModel: one segment per call, with a word near each end
+    of every clip (so the text covers them), or at the start of the audio without clips."""
 
     def __init__(self):
         self.calls = []
 
     def transcribe(self, audio, **options):
         self.calls.append((len(audio), options))
-        words = [FakeWord(0.5, 0.9, " Hello."), FakeWord(1.0, 1.4, " Again.")]
+        stamps = options.get("clip_timestamps") or [0.0, 1.9]
+        words = []
+        for start, end in zip(stamps[::2], stamps[1::2]):
+            words += [FakeWord(start + 0.3, start + 0.7, " Hello."), FakeWord(end - 0.7, end - 0.3, " Again.")]
         info = type("Info", (), {"language": options.get("language") or "en", "language_probability": 1.0})()
-        return iter([FakeSegment(0.5, 1.4, words)]), info
+        return iter([FakeSegment(words[0].start, words[-1].end, words)]), info
 
 
 def fake_transcriber(monkeypatch, clips):
@@ -217,7 +221,7 @@ def test_clips_cut_out_of_running_speech_go_without_the_word_bank(monkeypatch):
     calls = [options for _, options in transcriber.model.calls]
     assert [(c["clip_timestamps"], c["hotwords"]) for c in calls] == [
         ([1.0, 28.0, 56.5, 80.0], "Quuxian, Vexley"), ([28.0, 55.0, 80.0, 99.0], None)]
-    assert len(result.words) == 4 and result.speech == clips  # both decodes' words, all the speech
+    assert len(result.words) == 8 and result.speech == clips  # both decodes' words, all the speech
 
 
 def test_without_a_word_bank_all_clips_go_in_one_decode(monkeypatch):
@@ -234,6 +238,68 @@ def test_the_second_decode_keeps_the_detected_language_and_progress_only_grows(m
     transcriber.transcribe(np.zeros(16000 * 60, np.float32), language=None, hotwords="Quuxian", progress=seen.append)
     assert [options["language"] for _, options in transcriber.model.calls] == [None, "en"]
     assert seen == sorted(seen) and seen[-1] <= 1.0
+
+
+# ---- speech a word bank left without text ---------------------------------------------
+def test_a_clip_without_text_is_uncovered_whole():
+    assert asr.uncovered((10.0, 30.0), []) == [(10.0, 30.0)]
+    credit_only = say((" Subtitles", 0.6), (" by", 0.9), (" the", 0.9), (" Amara.org", 1.0), (" community", 1.0))
+    assert asr.uncovered((0.0, 20.0), credit_only) == [(0.0, 20.0)]  # dropped later, so it covers nothing
+
+
+def test_text_that_starts_or_ends_well_inside_a_clip_leaves_those_parts_uncovered():
+    words = [Word(14.0, 14.4, " The", 0.9), Word(14.4, 15.0, " test.", 0.9)]
+    assert asr.uncovered((10.0, 30.0), words) == [(10.0, 14.0), (15.0, 30.0)]
+    # Normal margins: the voice detector's padding and Whisper's timing, about 0.3-1.4 s.
+    assert asr.uncovered((13.7, 16.2), words) == []
+
+
+def test_gaps_are_filled_from_the_second_decode_without_repeats():
+    kept = [Word(14.0, 14.4, " The", 0.9), Word(14.4, 15.0, " test.", 0.9)]
+    other = [Word(10.5, 10.9, " First,", 0.8), Word(11.0, 11.4, " we", 0.8), Word(11.5, 13.0, " see", 0.8),
+             Word(13.5, 13.95, " the", 0.7),  # the kept "The", timed a little earlier
+             Word(14.4, 15.0, " test.", 0.9),  # inside the kept text
+             Word(15.05, 15.5, " test.", 0.7),  # the kept "test.", timed a little later
+             Word(16.0, 16.5, " Then", 0.8), Word(16.5, 17.0, " more.", 0.8)]
+    filled = asr.fill_gaps([(10.0, 14.0), (15.0, 30.0)], kept, other)
+    assert [w.text for w in filled] == [" First,", " we", " see", " Then", " more."]
+
+
+class BankShy:
+    """A model that, given hotwords, writes one word in the middle of each clip; without, a word
+    every second all through it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio, clip_timestamps, hotwords=None, **options):
+        self.calls.append((list(clip_timestamps), hotwords))
+        segments = []
+        for start, end in zip(clip_timestamps[::2], clip_timestamps[1::2]):
+            middle = (start + end) / 2
+            times = ([(middle - 0.5, middle + 0.5)] if hotwords
+                     else [(float(t), float(t) + 0.8) for t in np.arange(start + 0.3, end - 0.8)])
+            words = [FakeWord(a, b, f" w{a:.2f}") for a, b in times]
+            segments.append(FakeSegment(words[0].start, words[-1].end, words))
+        info = types.SimpleNamespace(language=options.get("language") or "en", language_probability=1.0)
+        return iter(segments), info
+
+
+def test_speech_a_word_bank_left_out_is_decoded_again_without_it(monkeypatch):
+    clips = [(1.0, 21.0), (25.0, 26.5)]
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: clips)
+    transcriber = object.__new__(asr.Transcriber)
+    transcriber.model = BankShy()
+    seen = []
+    result = transcriber.transcribe(np.zeros(16000 * 30, np.float32), language="en", hotwords="Quuxian",
+                                    progress=seen.append)
+    # With the bank, the first clip's text covers 10.5-11.5 s only; the short second clip is fine.
+    assert transcriber.model.calls == [([1.0, 21.0, 25.0, 26.5], "Quuxian"), ([1.0, 21.0], None)]
+    starts = [round(w.start, 2) for w in result.words]
+    head = [round(1.3 + k, 2) for k in range(9)]  # 1.3-9.3; the word at 10.3 is where the bank's own is
+    tail = [round(11.3 + k, 2) for k in range(9)]  # 11.3-19.3: their middles fall after the bank word's end
+    assert starts == head + [10.5] + tail + [25.25]  # the bank's words stay, with the gaps filled around them
+    assert seen == sorted(seen) and seen[-1] == 1.0
 
 
 def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
