@@ -45,6 +45,16 @@ def test_spoken_thanks_are_kept():
         assert drop_sign_offs(words) == words
 
 
+def test_sign_offs_about_listening_are_dropped_too():
+    # With a word bank sent as a sentence, the sign-off on hum and music became "Thank you for
+    # listening." (p 0.16-0.17 for "Thank"), and once it ran on into far-off chatter.
+    assert drop_sign_offs(say((" Thank", 0.16), (" you", 1.0), (" for", 0.06), (" listening.", 0.32))) == []
+    assert drop_sign_offs(say((" Thanks", 0.2), (" for", 0.5), (" listening!", 0.6))) == []
+    words = say((" on.", 1.0), (" Thank", 0.08), (" you", 0.99), (" for", 0.08), (" listening", 0.41), (" to", 0.42),
+                (" the", 0.24), (" Thursday", 0.45), (" afternoon.", 0.96))
+    assert text(drop_sign_offs(words)) == " on."
+
+
 def test_thanks_that_go_on_are_kept():
     # Not a sign-off, even when Whisper is unsure of the first word.
     words = say((" Thank", 0.3), (" you", 0.9), (" for", 0.9), (" the", 0.9), (" question.", 0.9))

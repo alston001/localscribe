@@ -97,9 +97,12 @@ def _without_words(words: list[Word], end: float) -> list[tuple[float, float]]:
     return stretches
 
 
-# Closing lines Whisper writes on its own, longest first (see drop_sign_offs).
-_SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
-              ("thanks", "for", "watching"), ("thank", "you"), ("thanks",)]
+# Closing lines Whisper writes on its own, longest first (see drop_sign_offs). The ones for
+# watching or listening may run on to the end of their sentence.
+_SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "for", "listening"),
+              ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
+              ("thanks", "for", "watching"), ("thanks", "for", "listening"), ("thank", "you"), ("thanks",)]
+_RUN_ON = {"watching", "listening"}
 # Credits and appeals from subtitled videos, which nobody says in a recording.
 _CREDITS = re.compile(
     r"\b(?:sub)?titles?\s+(?:by|from)\s+(?:the\s+)?amara\.org(?:\s+community)?|\bamara\.org(?:\s+community)?"
@@ -123,7 +126,8 @@ def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
 
     With a word bank, such clips also came out as video credits ("Subtitles by the Amara.org
     community", "Transcription by CastingWords") at p 0.6-1.0. Those are dropped whatever the
-    probability, and only the credit itself: speech in the same clip stays.
+    probability, and only the credit itself: speech in the same clip stays. With the bank sent
+    as a sentence, the sign-off became "Thank you for listening.", sometimes running on.
     """
     words = _drop_credits(words)
     kept, i = [], 0
@@ -138,11 +142,19 @@ def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
 
 
 def _sign_off_length(words: list[Word], i: int) -> int:
+    def ends_sentence(k: int) -> bool:
+        return words[k].text.rstrip().endswith((".", "!", "?"))
+
     for phrase in _SIGN_OFFS:
         span = words[i:i + len(phrase)]
-        if (len(span) == len(phrase) and span[-1].text.rstrip().endswith((".", "!", "?"))
-                and tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) == phrase):
-            return len(phrase)
+        if len(span) < len(phrase) or tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) != phrase:
+            continue
+        end = i + len(phrase)  # one past the sign-off's last word
+        if phrase[-1] in _RUN_ON:
+            while not ends_sentence(end - 1) and end < len(words) and end - i < 12:
+                end += 1
+        if ends_sentence(end - 1):
+            return end - i
     return 0
 
 
