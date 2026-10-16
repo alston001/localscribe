@@ -22,8 +22,8 @@ from ..core.media import MEDIA_EXTENSIONS, probe
 from ..core.pipeline import Engine
 from ..export import FORMATS
 from ..i18n import tr
-from ..vocabulary import (PROMPT_LIMIT, TokenCounter, Vocabulary, find_vocabulary, fit_terms, join_terms,
-                          load_vocabularies, prompt_terms, replace_vocabulary, save_vocabularies, token_counter)
+from ..vocabulary import (PROMPT_LIMIT, TokenCounter, Vocabulary, find_vocabulary, fit_terms, load_vocabularies,
+                          prompt_terms, prompt_text, replace_vocabulary, save_vocabularies, token_counter)
 from . import style
 from .convert_dialog import ConvertDialog
 from .jobs import JobTableModel, QueueView
@@ -588,13 +588,14 @@ class MainWindow(QMainWindow):
             log.info("Left out %d term(s) past Whisper's limit of %d tokens", len(dropped), PROMPT_LIMIT)
         elif dropped:  # an estimate can be off either way, so Whisper keeps what really fits
             kept += dropped
-        return join_terms(kept), vocabulary.name if vocabulary else ""
+        return prompt_text(kept, self.settings.language), vocabulary.name if vocabulary else ""
 
     def _token_counter(self) -> TokenCounter:
-        """Counts with the tokenizer of the Whisper model that will run, once that is known."""
+        """Counts what the run will send, with the tokenizer of the Whisper model that will run
+        once that is known."""
         if self.settings.whisper_model == "auto" and self.device_info is None:
-            return TokenCounter()  # "auto" depends on the GPU, which is still being detected
-        return token_counter(self.engine.store, self.engine.whisper_name())
+            return TokenCounter(language=self.settings.language)  # "auto" waits for the GPU check
+        return token_counter(self.engine.store, self.engine.whisper_name(), self.settings.language)
 
     def _confirm_dropped_terms(self, dropped: list[str], exact: bool) -> bool:
         shown = ", ".join(dropped[:40])

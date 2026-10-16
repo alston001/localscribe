@@ -51,6 +51,28 @@ def test_thanks_that_go_on_are_kept():
     assert drop_sign_offs(words) == words
 
 
+def test_video_credits_are_dropped_however_sure_whisper_is():
+    # With a word bank, hum, music or far-off chatter came out as these at p 0.6-1.0. Only the
+    # credit goes: the lecture that follows in the same clip stays.
+    words = say((" Subtitles", 0.62), (" by", 0.94), (" the", 0.86), (" Amara", 1.0), (".org", 1.0),
+                (" community", 1.0), (" Byte", 0.18), (" pair", 0.03), (" encoding", 0.99), (" starts.", 1.0))
+    assert text(drop_sign_offs(words)) == " Byte pair encoding starts."
+    assert drop_sign_offs(say((" Transcription", 0.38), (" by", 1.0), (" CastingWords", 0.93))) == []
+    assert drop_sign_offs(say((" Transcription", 0.32), (" by", 0.97), (" ESO.", 0.61), (" Translation", 1.0),
+                              (" by", 1.0), (" �", 0.99))) == []
+    words = say((" Okay.", 0.9), (" Please", 0.6), (" like,", 0.9), (" share,", 0.9), (" and", 0.9),
+                (" subscribe", 0.9), (" to", 0.9), (" our", 0.9), (" channel!", 0.9))
+    assert text(drop_sign_offs(words)) == " Okay."
+
+
+def test_sentences_that_only_look_like_credits_are_kept():
+    for words in (say((" Transcription", 0.9), (" by", 0.9), (" hand", 0.9), (" is", 0.9), (" slow.", 0.9)),
+                  say((" Please", 0.9), (" subscribe", 0.9), (" to", 0.9), (" the", 0.9), (" mailing", 0.9),
+                      (" list.", 0.9)),
+                  say((" I'd", 0.9), (" like", 0.9), (" to", 0.9), (" share", 0.9), (" this.", 0.9))):
+        assert drop_sign_offs(words) == words
+
+
 # ---- lost speech -------------------------------------------------------------------
 def test_speech_without_words_is_reported():
     speech = [(0.0, 27.0), (27.5, 55.0), (55.4, 83.0), (83.2, 110.0), (110.3, 130.0)]

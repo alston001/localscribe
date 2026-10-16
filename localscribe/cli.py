@@ -22,7 +22,7 @@ from .core.pipeline import Engine, EngineSettings, JobOptions, Progress  # noqa:
 from .export import FORMATS, write_outputs  # noqa: E402
 from .export.common import ExportOptions  # noqa: E402
 from .vocabulary import (PROMPT_LIMIT, find_vocabulary, fit_terms, join_terms, load_vocabularies,  # noqa: E402
-                         prompt_terms, token_counter)
+                         prompt_terms, prompt_text, token_counter)
 
 
 def parse_speakers(text: str) -> SpeakerCount:
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
                     log=lambda m: print(f"\r  {m}".ljust(90)))
     terms = prompt_terms(vocabulary, args.hotwords)
     if terms:  # "auto" names the model by its GPU check, which the first file needs anyway
-        counter = token_counter(engine.store, engine.whisper_name())
+        counter = token_counter(engine.store, engine.whisper_name(), args.language)
         kept, dropped = fit_terms(terms, counter)
         if dropped and counter.exact:
             terms = kept
@@ -101,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
                   f"{PROMPT_LIMIT} tokens: {join_terms(dropped)}")
     opts = JobOptions(language=None if args.language == "auto" else args.language,
                       speakers=args.speakers, normalize=args.normalize,
-                      denoise=args.denoise, hotwords=join_terms(terms), speaker_prefix=args.speaker_label)
+                      denoise=args.denoise, hotwords=prompt_text(terms, args.language),
+                      speaker_prefix=args.speaker_label)
     export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps)
 
     def show(p: Progress) -> None:

@@ -70,6 +70,16 @@ def lost_speech(speech: list[tuple[float, float]], words: list[Word], min_speech
 # Closing lines Whisper writes on its own, longest first (see drop_sign_offs).
 _SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
               ("thanks", "for", "watching"), ("thank", "you"), ("thanks",)]
+# Credits and appeals from subtitled videos, which nobody says in a recording.
+_CREDITS = re.compile(
+    r"\b(?:sub)?titles?\s+(?:by|from)\s+(?:the\s+)?amara\.org(?:\s+community)?|\bamara\.org(?:\s+community)?"
+    r"|字幕由\s*amara\.org\s*社[区區]提供"
+    r"|\b(?:transcription|subtitles|captions)\s+by\s+castingwords\b|\bcastingwords\b"
+    r"|\btranscription\s+by\s+eso\b[.,]?(?:\s+translation\s+by\b[^.!?]*)?"
+    r"|\b(?:please\s+)?(?:don'?t\s+forget\s+to\s+)?like,?\s+(?:share,?\s+)?(?:comment,?\s+)?and\s+subscribe\b"
+    r"(?:\s+to\s+(?:our|my|the)\s+channel)?[.!]?"
+    r"|\b(?:please\s+)?subscribe\s+to\s+(?:our|my|the)\s+channel\b[.!]?",
+    re.IGNORECASE)
 
 
 def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
@@ -80,7 +90,12 @@ def drop_sign_offs(words: list[Word], max_p: float = 0.5) -> list[Word]:
     the first word of these (p 0.02-0.26) and sure of spoken thanks (p 0.79 or more, also
     quiet or over chatter). So a sign-off that ends a sentence and starts with a word below
     `max_p` is dropped; "Thank you for the question" goes on, so it stays.
+
+    With a word bank, such clips also came out as video credits ("Subtitles by the Amara.org
+    community", "Transcription by CastingWords") at p 0.6-1.0. Those are dropped whatever the
+    probability, and only the credit itself: speech in the same clip stays.
     """
+    words = _drop_credits(words)
     kept, i = [], 0
     while i < len(words):
         length = _sign_off_length(words, i) if words[i].prob < max_p else 0
@@ -99,6 +114,23 @@ def _sign_off_length(words: list[Word], i: int) -> int:
                 and tuple(re.sub(r"[^\w']", "", w.text.lower()) for w in span) == phrase):
             return len(phrase)
     return 0
+
+
+def _drop_credits(words: list[Word]) -> list[Word]:
+    """`words` without the ones a _CREDITS match covers in their joined text."""
+    text = "".join(w.text for w in words)
+    covered = [False] * len(text)
+    for match in _CREDITS.finditer(text):
+        covered[match.start():match.end()] = [True] * (match.end() - match.start())
+    if not any(covered):
+        return words
+    kept, start = [], 0
+    for word in words:
+        end = start + len(word.text)
+        if not any(covered[k] and not text[k].isspace() for k in range(start, end)):
+            kept.append(word)
+        start = end
+    return kept
 
 
 def speech_clips(audio: np.ndarray, threshold: float = 0.2, max_len: float = 28.0,
