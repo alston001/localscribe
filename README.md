@@ -28,6 +28,7 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
   - **sherpa-onnx**: built in, no account needed; used whenever pyannote isn't installed
 - **Scenario presets**: one-on-one interview (exactly 2 speakers), group meeting (2–10), lecture (any number), online meeting (any number, with noise reduction)
 - **Word banks**: your own lists of technical terms, e.g. one per course, that help Whisper spell jargon. Pick one for each batch of recordings
+- **Proofreading aids**: optionally mark the words Whisper was unsure of, so you know where to listen again. Long stretches without text are marked in the transcript, with a note when speech was heard there
 - **Exports**, any combination: Word, plain text, Markdown, SRT, WebVTT, Excel, CSV. Every run also saves a `_transcript.json` for future editing tools
 - Never overwrites: a repeated run saves `name_transcript (2).docx`
 - English or Traditional Chinese interface (follows Windows; change it in Settings)
@@ -58,6 +59,11 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
 
 **Word banks**: Whisper often mishears technical terms (e.g. "tokenization" written as "organization"). Keep the terms of each course or topic in a word bank and pick it before you click **Start**. In the **Word bank** menu, choose **+ New word bank…**, give it a name such as "NLP class" and enter one term per line (a pasted comma-separated list works too). The pencil and bin icons in the same menu edit and delete banks; type in its search box to find one. The chosen bank's terms are combined with **Settings → Names and terms**, bank first. Whisper reads only the first 223 tokens of these terms: about 55 English terms, or 35 Chinese ones. The editor counts them as you type, and if the bank and Names and terms together go over, LocalScribe lists the terms that would be left out before the run starts. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json` (copy that file to use them on another computer), and `_transcript.json` records which bank was used.
 
+**Proofreading aids** help you decide where to listen again:
+
+- **Mark unsure words** (off by default) marks the words Whisper gave less than 40% confidence. Word highlights them in yellow; text and Markdown put `(?)` after the word, as in `tokenization(?),`; Excel and CSV list them in an extra *Unsure words* column, so the text column stays as spoken and you can filter the rows that need checking. Subtitles are never marked. **Most recognition errors are not marked**: a word Whisper misheard with confidence, such as "organization" for "tokenization", looks like any other word. So the marks complement word banks and proofreading; they don't replace them. A segment whose text was edited after transcription has no confidences left, so nothing in it is marked. How the 40% was chosen is under [Accuracy and speed](#accuracy-and-speed).
+- **Stretches without text** of 30 seconds or more get a line in text, Markdown and Word transcripts, such as `[No speech 00:40:30–00:42:05]`. Where the voice detector heard at least 30 seconds of speech but no text came out, the line says `[Speech detected, no text 00:40:30–00:42:05]` instead: listen there, something may be missing. These are the same stretches the warning on the finished file lists. The times stay even with timestamps turned off, so you can find the spot. Subtitles show silences through their timing and spreadsheets through their start and end times, so they get no markers. Any silence over 10 seconds also starts a new paragraph, so the jump shows in the timestamps even when Whisper left out the period before it.
+
 **iPhone Voice Memos**: drop .qta files straight in; no conversion is needed. To play or share them on Windows, use **Convert…**, and tick **Add converted files to the transcription list** to transcribe them as well.
 
 **Offline computers**: copy `%LOCALAPPDATA%\LocalScribe\models` from a computer that has already downloaded the models, or point **Settings → Model folder** at it.
@@ -77,6 +83,8 @@ Main window:
 | Even out volume | Levels quiet and loud voices (far from the microphone, remote callers). Used for speech recognition only; speaker identification always hears the original audio |
 | Reduce noise | Mild background-noise reduction. Leave it off for clean recordings |
 | Output formats / Save to | Which files to write, and where |
+| Include timestamps | A timestamp at the start of each turn in Word, text and Markdown |
+| Mark unsure words | Marks the words Whisper was unsure of; see [Proofreading aids](#usage). Off by default |
 
 Settings dialog:
 
@@ -95,11 +103,11 @@ Settings dialog:
 
 | Format | Contents |
 |---|---|
-| Word (.docx) | One paragraph per speaker turn with a coloured speaker name and timestamp, page numbers, recording details |
-| Plain text (.txt) | `[00:01:23] Speaker 1: …` per turn (timestamps optional) |
+| Word (.docx) | One paragraph per speaker turn with a coloured speaker name and timestamp, page numbers, recording details. Unsure words highlighted (optional); a line for each long stretch without text |
+| Plain text (.txt) | `[00:01:23] Speaker 1: …` per turn (timestamps optional). `(?)` after unsure words (optional); a line for each long stretch without text |
 | Markdown (.md) | Same as text, formatted for Markdown viewers |
 | SRT / WebVTT | Subtitles of up to 2 lines, with the speaker named when the speaker changes |
-| Excel (.xlsx) / CSV | One row per sentence: start, end, speaker, text. Handy for coding qualitative data |
+| Excel (.xlsx) / CSV | One row per sentence: start, end, speaker, text, and optionally the sentence's unsure words. Handy for coding qualitative data |
 | JSON (always) | Every word with its time, confidence and speaker, for future editing tools |
 
 ## Accuracy and speed
@@ -109,6 +117,16 @@ Always proofread. Speech recognition errors cluster around names, technical term
 **A real recording.** We transcribed a 78-minute classroom recording with several speakers and compared the result with the transcript that iPhone Voice Memos produced for the same file. Neither transcript is ground truth. The two agreed on about 88% of the words. In 60 sampled passages where they differed, LocalScribe's wording fit the context better far more often, especially for technical terms (it wrote "chatbot", "COBOL", "embeddings" where the other had misspellings or unrelated words). The phone's transcript has no speaker labels or timestamps. LocalScribe adds both, but nobody has checked its speaker labels against the audio, so spot-check them.
 
 **Synthetic tests** (two recorded voices, known script): 100% of words attributed to the right speaker for a two-person interview and a three-person panel.
+
+**How sure is "unsure"?** The 40% threshold of **Mark unsure words** was chosen on 12 synthetic recordings: Windows text-to-speech voices reading known scripts (the interview, the panel, a project-management lecture and an NLP lecture full of jargon), each rendered clean, in a reverberant room, and far from the microphone in a noisier room; 33 minutes in all. Every word large-v3 wrote was compared with the script:
+
+| Threshold | Words marked | Marked words that were wrong | Errors that got a mark |
+|---|---|---|---|
+| 30% | 2.2% | 77% | 20% |
+| **40%** | **3.3%** | **76%** | **31%** |
+| 50% | 5.1% | 68% | 42% |
+
+In the clean and reverberant recordings, the ones closest to a usable class recording, 40% marked 0.9% of the words and 18 of those 32 words were wrong. 50% marked almost twice as many, but 22 of the 28 extra marks were correct words. In the NLP lecture, 29 of the 37 marks were errors, such as "quarter stemmer" for "Porter stemmer" (18%). "Atom optimizer" for "Adam optimizer" (65%) and "Zip's law" for "Zipf's law" (89%) got no mark: confident errors are why a mark can't replace proofreading or a word bank. The small model, which computers without an NVIDIA GPU use, makes more errors, so it marked more words (2.8% in the clean and reverberant recordings), and 68% of its marks were errors. Fast mode marked about as many words as the default (1.1%), but more of its marks fell on correct words at the edges of its 30-second chunks.
 
 **Speed** on an RTX 3070 Ti (8 GB) with a Ryzen 7 5800X:
 
@@ -237,6 +255,8 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 **情境**：一對一訪談（固定 2 人）、小組會議（2–10 人）、演講課堂（自動判斷人數）、線上會議（自動判斷人數，含降噪）。知道確切人數時，直接指定人數，分辨說話人的效果最好；但不要把上限設得比實際人數少，否則同一個人可能被拆成兩位。
 
 **詞庫**：Whisper 常把專有名詞聽錯（例如把 "tokenization" 寫成 "organization"）。可以為每門課或每個主題建立一個詞庫，開始轉換前在「詞庫」選單選好。選「＋ 新增詞庫…」，取個名稱（例如「NLP 課」），一行輸入一個詞（也可以貼上以逗號分隔的清單）；同一個選單裡的鉛筆和垃圾桶圖示可以編輯或刪除詞庫。詞庫的詞會和「設定 → 專有名詞」一起使用，詞庫在前。Whisper 最多只讀前 223 個 token（約 55 個英文詞或 35 個中文詞），編輯時會即時顯示用量；兩者加起來超過時，開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`，`_transcript.json` 會記錄用了哪個詞庫。
+
+**校對輔助**：勾選「標記不確定的字詞」（預設關閉）後，Whisper 把握低於 40% 的字會被標出：Word 以黃色標示，txt 和 md 在字後加 (?)，Excel 和 CSV 多一欄「不確定的字詞」；字幕不標記。很有把握卻聽錯的字（例如把 tokenization 聽成 organization）不會被標出，所以標記只是告訴你先從哪裡重聽，不能取代詞庫和校對。另外，30 秒以上沒有轉出文字的地方，txt、md 和 Word 會寫上「[無語音 00:40:30–00:42:05]」；如果那段偵測到說話聲，會寫「[偵測到語音，但沒有轉出文字 …]」，請回去聽是否漏掉內容。超過 10 秒的停頓也會開始新段落，時間戳記就看得出中間的空白。
 
 **iPhone 語音備忘錄（.qta）**：直接拖進視窗就能轉錄，不用先轉檔。要在 Windows 上播放或分享，可以用「轉檔…」轉成 M4A 或 MP3。
 
