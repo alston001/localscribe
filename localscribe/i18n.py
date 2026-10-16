@@ -157,9 +157,10 @@ STRINGS: dict[str, tuple[str, str]] = {
     "hotwords_placeholder": ("例如：Dr. Patel, NVivo, MATLAB", "e.g. Dr. Patel, NVivo, MATLAB"),
     # word banks: picker in the main window, editor, check before a run
     "vocabulary": ("詞庫", "Word bank"),
-    "vocabulary_tip": ("常用的專有名詞清單（例如一門課一個），幫助 Whisper 拼對術語；設定裡的「專有名詞」也會一起使用",
-                       "Technical terms you reuse, e.g. one bank per course, to help Whisper spell jargon. "
-                       "Names and terms from Settings are added as well"),
+    "vocabulary_tip": ("專有名詞清單（例如一個主題一個），幫助 Whisper 拼對術語。只在錄音真的會講到這些詞時才選，"
+                       "否則選「不使用」。設定裡的「專有名詞」也會一起使用",
+                       "Technical terms, e.g. one bank per topic, to help Whisper spell jargon. Pick one only when the "
+                       "recording uses its terms; otherwise choose None. Names and terms from Settings are added as well"),
     "vocab_none": ("不使用", "None"),
     "vocab_search": ("搜尋", "Search"),
     "vocab_no_match": ("沒有符合的詞庫", "No matching word bank"),
@@ -172,6 +173,11 @@ STRINGS: dict[str, tuple[str, str]] = {
     "vocab_name": ("名稱", "Name"),
     "vocab_name_placeholder": ("例如：NLP 課、實驗室會議", "e.g. NLP class, Lab meeting"),
     "vocab_terms": ("詞彙", "Terms"),
+    "vocab_use_hint": ("只在錄音真的會講到這些詞時才選這個詞庫，否則選「不使用」。詞彙和內容無關時沒有幫助，"
+                       "Whisper 還可能把它們寫進沒說的地方，而且轉錄會變慢（測試中慢三到六成）。",
+                       "Pick this bank only for recordings that use its terms; otherwise choose None. Unrelated terms "
+                       "don't help, Whisper may write them where they weren't said, and transcription is slower "
+                       "(30–60% in tests)."),
     "vocab_terms_hint": ("一行一個詞，也可以直接貼上用逗號分隔的清單；空白行和重複的詞會自動略過。",
                          "One term per line, or paste a comma-separated list. Empty lines and duplicates are ignored."),
     "vocab_tokens": ("{terms} 個詞，{n} / {limit} 個 token", "{terms} term(s), {n} / {limit} tokens"),

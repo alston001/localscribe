@@ -1140,3 +1140,17 @@ def test_picker_and_editor():
     assert out["save_failed"] == [0, "Disk full", "glimmerform", ["Glimmer studies"]]  # still open, nothing lost
     assert out["save_ok"] == 1
     assert out["same_row_any_viewport_font"]  # the term count isn't cut off on Windows
+
+
+def test_the_editor_says_when_to_use_a_bank():
+    # Real lectures showed a bank only helps recordings that use its terms; unrelated terms
+    # gained nothing, may be written where they weren't said, and cost 30-60% more time.
+    import inspect
+
+    from localscribe import i18n
+    from localscribe.ui import vocabulary_picker
+
+    zh, en = i18n.STRINGS["vocab_use_hint"]
+    assert "None" in en and "30–60%" in en and "不使用" in zh and "三到六成" in zh
+    assert 'tr("vocab_use_hint")' in inspect.getsource(vocabulary_picker)
+    assert "one bank per course" not in i18n.STRINGS["vocabulary_tip"][1]

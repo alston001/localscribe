@@ -315,6 +315,7 @@ class VocabularyEditor(QDialog):
         layout.addLayout(form)
         layout.addWidget(QLabel(tr("vocab_terms")))
         layout.addWidget(QLabel(tr("vocab_terms_hint"), objectName="hint", wordWrap=True))
+        layout.addWidget(QLabel(tr("vocab_use_hint"), objectName="hint", wordWrap=True))
         self.txt_terms = QPlainTextEdit(objectName="terms")
         self.txt_terms.setPlainText("\n".join(original.terms) if original else "")
         self.txt_terms.textChanged.connect(self._update_count)

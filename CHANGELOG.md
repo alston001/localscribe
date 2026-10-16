@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **When to use a word bank.** On two more lectures about other topics, the NLP bank gained nothing and wrote a few of its terms where they probably weren't said, and with a bank transcription took 30–60% longer. The word-bank menu, the editor and the README now say to pick a bank only for recordings that use its terms.
+
+### 中文摘要
+
+- **詞庫的使用時機**：在另外兩堂主題不同的課上，NLP 詞庫沒有幫助，還可能把幾個詞寫進沒說的地方，轉錄也慢了三到六成。詞庫選單、編輯視窗和 README 現在都會說明：只在錄音真的會講到這些詞時才選詞庫。
+
 ## 0.1.2
 
 Changes since 0.1.1, from a code review and a round of hands-on testing.
