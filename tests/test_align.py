@@ -41,10 +41,10 @@ def test_one_word_reply_is_kept():
 
 
 def test_late_change_moves_back_to_the_sentence_start():
-    # B's turn starts after "Give", which Whisper also stretched back to "here.": B holds
-    # less than 70 % of the sentence, so it used to come out as "Give / me an example."
-    ws = words([(0.0, 0.2, " We"), (0.2, 0.45, " start"), (0.45, 0.6, " here."), (0.6, 1.1, " Give"),
-                (1.1, 1.3, " me"), (1.3, 1.45, " an"), (1.45, 2.0, " example.")])
+    # B's turn starts after "Show", which Whisper also stretched back to "here.": B holds
+    # less than 70 % of the sentence, so it used to come out as "Show / me the result."
+    ws = words([(0.0, 0.2, " We"), (0.2, 0.45, " start"), (0.45, 0.6, " here."), (0.6, 1.1, " Show"),
+                (1.1, 1.3, " me"), (1.3, 1.45, " the"), (1.45, 2.0, " result.")])
     turns = [Turn(0.0, 1.05, "A"), Turn(1.05, 2.5, "B")]
     labels, coverage = assign_speakers(ws, turns)
     assert labels == ["A"] * 4 + ["B"] * 3
@@ -52,9 +52,9 @@ def test_late_change_moves_back_to_the_sentence_start():
 
 
 def test_late_change_moves_back_to_a_pause():
-    # No full stop after "here", only a pause; A's turn runs on over "give me".
-    ws = words([(0.0, 0.2, " we"), (0.2, 0.5, " start"), (0.5, 0.8, " here"), (1.4, 1.7, " give"),
-                (1.7, 1.9, " me"), (1.9, 2.05, " an"), (2.05, 2.6, " example.")])
+    # No full stop after "here", only a pause; A's turn runs on over "show me".
+    ws = words([(0.0, 0.2, " we"), (0.2, 0.5, " start"), (0.5, 0.8, " here"), (1.4, 1.7, " show"),
+                (1.7, 1.9, " me"), (1.9, 2.05, " the"), (2.05, 2.6, " result.")])
     turns = [Turn(0.0, 1.95, "A"), Turn(1.95, 3.0, "B")]
     labels, coverage = assign_speakers(ws, turns)
     assert labels == ["A"] * 5 + ["B"] * 2
@@ -62,9 +62,9 @@ def test_late_change_moves_back_to_a_pause():
 
 
 def test_early_change_moves_forward_to_the_sentence_end():
-    # B's turn starts too early, taking "lemonize it?": "So how do we / lemonize it?"
+    # B's turn starts too early, taking "measure it?": "So how do we / measure it?"
     ws = words([(0.0, 0.2, " So"), (0.2, 0.4, " how"), (0.4, 0.5, " do"), (0.5, 0.65, " we"),
-                (0.65, 1.15, " lemonize"), (1.15, 1.35, " it?"),
+                (0.65, 1.15, " measure"), (1.15, 1.35, " it?"),
                 (1.35, 1.55, " With"), (1.55, 1.65, " a"), (1.65, 2.2, " function.")])
     turns = [Turn(0.0, 0.7, "A"), Turn(0.7, 2.5, "B")]
     labels, coverage = assign_speakers(ws, turns)
@@ -75,7 +75,7 @@ def test_early_change_moves_forward_to_the_sentence_end():
 def test_early_change_moves_forward_to_a_pause():
     # No question mark after "it", only a pause.
     ws = words([(0.0, 0.2, " so"), (0.2, 0.4, " how"), (0.4, 0.5, " do"), (0.5, 0.65, " we"),
-                (0.65, 1.15, " lemonize"), (1.15, 1.35, " it"),
+                (0.65, 1.15, " measure"), (1.15, 1.35, " it"),
                 (1.95, 2.15, " with"), (2.15, 2.25, " a"), (2.25, 2.8, " function.")])
     turns = [Turn(0.0, 0.7, "A"), Turn(0.7, 3.0, "B")]
     labels, coverage = assign_speakers(ws, turns)

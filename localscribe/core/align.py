@@ -125,7 +125,7 @@ def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
 
     # Sentence-edge pass: a sentence, or a stretch between pauses, split one or two words
     # from its start or end goes whole to the speaker of the rest, with no majority needed,
-    # so the change lands at the sentence end or pause instead of "Give / me an example".
+    # so the change lands at the sentence end or pause instead of "Show / me the result".
     # Only a change inside fluent speech moves: a reply after a silence or a comma
     # ("you know, / Right.") stays. The part that moves may hold at most 1.5 times as long
     # in its speaker's turns as the other part, since turn edges run late or early; if
