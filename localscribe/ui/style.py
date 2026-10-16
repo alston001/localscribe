@@ -116,6 +116,17 @@ QPlainTextEdit {{
     background: #111827; color: #E5E7EB; border-radius: 8px; padding: 6px;
     font-family: Consolas, "Microsoft JhengHei UI", monospace; font-size: 9pt;
 }}
+QPlainTextEdit#terms {{
+    background: {SURFACE}; color: {TEXT}; border: 1px solid {BORDER}; border-radius: 6px; padding: 4px 6px;
+    font-family: "Segoe UI", "Microsoft JhengHei UI"; font-size: 10pt;
+}}
+QPlainTextEdit#terms:focus {{ border-color: {ACCENT}; }}
+
+QFrame#vocabularyPopup {{ background: {SURFACE}; border: 1px solid {STRONG_BORDER}; }}
+QFrame#vocabularyPopup QListWidget {{ background: {SURFACE}; border: none; outline: 0; padding: 0; }}
+QFrame#vocabularyLine {{ background: {BORDER}; border: none; }}
+QPushButton#vocabularyNew {{ border: none; border-radius: 4px; text-align: left; padding: 7px 10px; color: {ACCENT}; font-weight: 600; }}
+QPushButton#vocabularyNew:hover {{ background: {WINDOW}; }}
 QStatusBar {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}
 QStatusBar QLabel {{ color: {MUTED}; padding: 0 10px; }}
 QStatusBar::item {{ border: none; }}

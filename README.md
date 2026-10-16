@@ -27,6 +27,7 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
   - **pyannote** (community-1): the most accurate; needs a one-time free Hugging Face token (see below)
   - **sherpa-onnx**: built in, no account needed; used whenever pyannote isn't installed
 - **Scenario presets**: one-on-one interview (exactly 2 speakers), group meeting (2–10), lecture (any number), online meeting (any number, with noise reduction)
+- **Word banks**: your own lists of technical terms, e.g. one per course, that help Whisper spell jargon. Pick one for each batch of recordings
 - **Exports**, any combination: Word, plain text, Markdown, SRT, WebVTT, Excel, CSV. Every run also saves a `_transcript.json` for future editing tools
 - Never overwrites: a repeated run saves `name_transcript (2).docx`
 - English or Traditional Chinese interface (follows Windows; change it in Settings)
@@ -49,11 +50,13 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
 ## Usage
 
 1. Drop files into the window (or click **Add files…**)
-2. Pick a **scenario**, the **language** and the **output formats**
+2. Pick a **scenario**, the **language**, a **word bank** if you have one, and the **output formats**
 3. Click **Start**. The first run downloads the Whisper model (about 3 GB with a GPU, 480 MB without); after that everything works offline
 4. Double-click a finished row to open the transcript; right-click to open its folder, see an error, or run it again
 
 **How it works**: FFmpeg decodes the file to 16 kHz mono → a voice detector finds speech and cuts it into clips of up to 28 s at natural pauses → Whisper transcribes each clip with word timestamps → pyannote or sherpa-onnx works out who spoke when → each word is matched to a speaker, and boundary words that land on the wrong side of a speaker change are pulled back into their sentence → the result is written in every format you picked.
+
+**Word banks**: Whisper often mishears technical terms (e.g. "tokenization" written as "organization"). Keep the terms of each course or topic in a word bank and pick it before you click **Start**. In the **Word bank** menu, choose **+ New word bank…**, give it a name such as "NLP class" and enter one term per line (a pasted comma-separated list works too). The pencil and bin icons in the same menu edit and delete banks; type in its search box to find one. The chosen bank's terms are combined with **Settings → Names and terms**, bank first. Whisper reads only the first 223 tokens of these terms: about 55 English terms, or 35 Chinese ones. The editor counts them as you type, and if the bank and Names and terms together go over, LocalScribe lists the terms that would be left out before the run starts. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json` (copy that file to use them on another computer), and `_transcript.json` records which bank was used.
 
 **iPhone Voice Memos**: drop .qta files straight in; no conversion is needed. To play or share them on Windows, use **Convert…**, and tick **Add converted files to the transcription list** to transcribe them as well.
 
@@ -69,6 +72,7 @@ Main window:
 |---|---|
 | Scenario | Fills in the speaker count and audio clean-up for common situations. Changing those by hand switches to *Custom* |
 | Language | Language spoken in the recording. *Detect automatically* works too, but naming the language is more reliable |
+| Word bank | Technical terms for this batch, e.g. one bank per course. The same menu creates, edits and deletes banks; see [Word banks](#usage) |
 | Speakers | *Automatic*, *Exactly N* or *Between N and M*. A known count is the single biggest help for speaker identification, but never set a maximum below the real number of voices: on a class with 7 voices, a cap of 5 split the lecturer into two speakers |
 | Even out volume | Levels quiet and loud voices (far from the microphone, remote callers). Used for speech recognition only; speaker identification always hears the original audio |
 | Reduce noise | Mild background-noise reduction. Leave it off for clean recordings |
@@ -83,7 +87,7 @@ Settings dialog:
 | Model | *Automatic* picks large-v3 on a GPU and small on a CPU. large-v3-turbo is much faster with slightly lower accuracy |
 | Device | *Automatic*, NVIDIA GPU or CPU. If the GPU fails, Automatic switches to the CPU by itself |
 | Fast mode | Batched decoding: faster on a GPU, but punctuation and speaker changes are slightly less accurate |
-| Names and terms | Comma-separated names and jargon (e.g. `Dr. Patel, NVivo`) to help Whisper spell them |
+| Names and terms | Comma-separated names and jargon (e.g. `Dr. Patel, NVivo`) to help Whisper spell them. Handy for one-off names; they are added after the chosen word bank's terms |
 | Speaker diarization engine | *Automatic* uses pyannote when it is installed, otherwise sherpa-onnx |
 | Model folder | Where models are stored and downloaded |
 
@@ -131,6 +135,7 @@ The token is used only for that download and is never stored. Public releases do
 - pyannote.audio 4 sends usage telemetry by default; LocalScribe turns it off (`PYANNOTE_METRICS_ENABLED=false`)
 - The log file `%LOCALAPPDATA%\LocalScribe\localscribe.log` holds file names (not folders) and timings, never transcript text. The technical details of an unexpected error can include a file's location, so check them before you share the log
 - `_transcript.json` and the Excel export store the recording's file name, not its folder
+- `_transcript.json` also records the name of the word bank used. Word banks stay in `%LOCALAPPDATA%\LocalScribe\vocabularies.json`
 
 ## Troubleshooting
 
@@ -176,7 +181,7 @@ Batch conversion from the command line:
 .venv\Scripts\python.exe -m localscribe.cli interview.m4a meeting.mp4 -f docx,srt -s 2
 ```
 
-`-s` accepts `auto`, a number (`2`) or a range (`2-6`); see `--help` for all options.
+`-s` accepts `auto`, a number (`2`) or a range (`2-6`); `--vocabulary "NLP class"` uses a word bank made in the app; see `--help` for all options.
 
 Tests:
 
@@ -230,6 +235,8 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 **使用**：把檔案拖進視窗，選好情境、語言和輸出格式，按「開始轉換」。第一次轉換會自動下載 Whisper 模型（有顯示卡約 3 GB，沒有約 480 MB），之後就完全離線。完成後雙擊該列可開啟逐字稿。要改成中文介面，請到「Settings → Interface language」選「繁體中文」。
 
 **情境**：一對一訪談（固定 2 人）、小組會議（2–10 人）、演講課堂（自動判斷人數）、線上會議（自動判斷人數，含降噪）。知道確切人數時，直接指定人數，分辨說話人的效果最好；但不要把上限設得比實際人數少，否則同一個人可能被拆成兩位。
+
+**詞庫**：Whisper 常把專有名詞聽錯（例如把 "tokenization" 寫成 "organization"）。可以為每門課或每個主題建立一個詞庫，開始轉換前在「詞庫」選單選好。選「＋ 新增詞庫…」，取個名稱（例如「NLP 課」），一行輸入一個詞（也可以貼上以逗號分隔的清單）；同一個選單裡的鉛筆和垃圾桶圖示可以編輯或刪除詞庫。詞庫的詞會和「設定 → 專有名詞」一起使用，詞庫在前。Whisper 最多只讀前 223 個 token（約 55 個英文詞或 35 個中文詞），編輯時會即時顯示用量；兩者加起來超過時，開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`，`_transcript.json` 會記錄用了哪個詞庫。
 
 **iPhone 語音備忘錄（.qta）**：直接拖進視窗就能轉錄，不用先轉檔。要在 Windows 上播放或分享，可以用「轉檔…」轉成 M4A 或 MP3。
 

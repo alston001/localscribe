@@ -46,6 +46,11 @@ def log_path() -> Path:
     return user_data_dir() / "localscribe.log"
 
 
+def vocabularies_path() -> Path:
+    """The user's word banks: kept with the settings, never in the project folder."""
+    return user_data_dir() / "vocabularies.json"
+
+
 def default_models_dir() -> Path:
     """Writable model folder. A source checkout keeps models inside the project."""
     if is_frozen():
