@@ -200,6 +200,23 @@ def uncovered(clip: tuple[float, float], words: list[Word], gap: float = UNCOVER
     return parts
 
 
+# A clip can hold natural pauses up to about 1.6 s (voice regions 1 s apart are joined, each
+# padded 0.3 s); the quiet stretches the original's text left inside clips on real lectures
+# lasted 6-10 s.
+INNER_GAP = 3.0
+
+
+def inner_gaps(clip: tuple[float, float], words: list[Word], gap: float = INNER_GAP) -> list[tuple[float, float]]:
+    """The holes inside `clip` where the text pauses for more than `gap` seconds. Used only for
+    the levelled copy's clips (see Transcriber._fill_quiet): there the voice detector heard speech
+    all through, so a long pause in the original's text is speech it left out."""
+    start, end = clip
+    kept = drop_sign_offs(sorted(words, key=lambda w: w.start))
+    holes = [(max(prev.end, start), min(nxt.start, end)) for prev, nxt in zip(kept, kept[1:])
+             if nxt.start - prev.end > gap]
+    return [(a, b) for a, b in holes if b > a]
+
+
 def fill_gaps(parts: list[tuple[float, float]], kept: list[Word], other: list[Word]) -> list[Word]:
     """The words of `other` (the same clip decoded again) whose middle falls in one of `parts`,
     without one that repeats the kept word right next to the part (the same word, timed apart).
@@ -325,11 +342,13 @@ class Transcriber:
     def _fill_quiet(self, quiet: np.ndarray, words: list[Word], options: dict, language: str,
                     cancel: threading.Event | None) -> tuple[list[Word], list[tuple[float, float]]]:
         """(words to add, the speech the levelled copy let the voice detector hear). Clips of the
-        levelled copy whose parts `words` leave without text (see uncovered) are decoded from the
-        copy, without the word bank as in its own fallback, and those parts filled (see fill_gaps)."""
+        levelled copy whose parts `words` leave without text, at the edges (see uncovered) or inside
+        (see inner_gaps), are decoded from the copy, without the word bank as in its own fallback,
+        and those parts filled (see fill_gaps)."""
         clips = speech_clips(quiet)
         by_clip = _in_clip(words, clips)
-        gaps = {k: uncovered(clip, by_clip.get(k, [])) for k, clip in enumerate(clips)}
+        gaps = {k: uncovered(clip, by_clip.get(k, [])) + inner_gaps(clip, by_clip.get(k, []))
+                for k, clip in enumerate(clips)}
         todo = [k for k, parts in gaps.items() if parts]
         if not todo:
             return [], clips

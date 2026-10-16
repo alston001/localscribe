@@ -405,3 +405,62 @@ def test_quiet_fills_are_decoded_without_the_word_bank(monkeypatch):
     transcriber, original, levelled = quiet_setup(monkeypatch, QuietlySpoken())
     transcriber.transcribe(original, language="en", hotwords="Quuxian", quiet=levelled)
     assert transcriber.model.calls[-1] == ("levelled", [20.0, 30.0], None)
+
+
+# ---- quiet speech in the middle of a clip -------------------------------------------------
+# On two real lectures the levelled copy found quiet stretches of 6-10 s inside clips whose
+# start and end the original's text covered; uncovered() looks only at clip edges.
+def test_a_long_hole_inside_a_clip_is_an_inner_gap():
+    words = talk(1, 5) + talk(12, 20)  # the text stops at 4.9 s and starts again at 12.0 s
+    assert asr.inner_gaps((0.0, 21.0), words) == [(4.9, 12.0)]
+
+
+def test_natural_pauses_inside_a_clip_are_not_inner_gaps():
+    # A clip can hold pauses up to about 1.6 s: regions 1 s apart are joined, each padded 0.3 s.
+    words = talk(1, 5) + talk(6.5, 10)
+    assert asr.inner_gaps((0.0, 11.0), words) == []
+
+
+class MiddleQuiet:
+    """The original audio has no text from 5 to 12 s inside the clip; the levelled copy has a
+    word every second throughout."""
+
+    def __init__(self):
+        self.calls = []
+
+    def transcribe(self, audio, clip_timestamps, **options):
+        levelled = float(audio[0]) == LEVELLED
+        self.calls.append(("levelled" if levelled else "original", list(clip_timestamps)))
+        segments = []
+        for start, end in zip(clip_timestamps[::2], clip_timestamps[1::2]):
+            times = [float(t) for t in np.arange(start + 0.2, end - 0.6)]
+            words = [FakeWord(t, t + 0.6, " quiet" if 5 <= t < 12 else " loud") for t in times
+                     if levelled or not 5 <= t < 12]
+            segments.append(FakeSegment(words[0].start, words[-1].end, words))
+        info = types.SimpleNamespace(language=options.get("language") or "en", language_probability=1.0)
+        return iter(segments), info
+
+
+def test_quiet_speech_inside_a_clip_is_filled_from_the_levelled_copy(monkeypatch):
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: [(1.0, 20.0)])
+    transcriber = object.__new__(asr.Transcriber)
+    transcriber.model = MiddleQuiet()
+    original = np.full(16000 * 21, ORIGINAL, np.float32)
+    levelled = np.full(16000 * 21, LEVELLED, np.float32)
+    result = transcriber.transcribe(original, language="en", quiet=levelled)
+    assert text(result.words) == " loud" * 4 + " quiet" * 7 + " loud" * 8  # once each, in order
+    assert transcriber.model.calls == [("original", [1.0, 20.0]), ("levelled", [1.0, 20.0])]
+
+
+def test_a_clip_with_only_natural_pauses_is_not_decoded_again(monkeypatch):
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: [(1.0, 20.0)])
+    transcriber = object.__new__(asr.Transcriber)
+    transcriber.model = FakeModel()  # text near both ends; the clip is short enough to count as covered
+    transcriber.model.transcribe = lambda audio, **o: (iter([FakeSegment(1.2, 19.8, [FakeWord(t, t + 0.4, " w") for t in np.arange(1.2, 19.5, 0.9)])]),
+                                                       types.SimpleNamespace(language="en", language_probability=1.0))
+    calls = []
+    original = np.full(16000 * 21, ORIGINAL, np.float32)
+    real = transcriber.model.transcribe
+    transcriber.model.transcribe = lambda audio, **o: (calls.append(float(audio[0])), real(audio, **o))[1]
+    transcriber.transcribe(original, language="en", quiet=np.full(16000 * 21, LEVELLED, np.float32))
+    assert calls == [ORIGINAL]  # words every 0.9 s leave no gap worth a second decode

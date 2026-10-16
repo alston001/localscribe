@@ -80,7 +80,7 @@ Main window:
 | Language | Language spoken in the recording. *Detect automatically* works too, but naming the language is more reliable |
 | Word bank | Technical terms for this batch, e.g. one bank per course. The same menu creates, edits and deletes banks; see [Word banks](#usage) |
 | Speakers | *Automatic*, *Exactly N* or *Between N and M*. A known count is the single biggest help for speaker identification, but never set a maximum below the real number of voices: on a class with 7 voices, a cap of 5 split the lecturer into two speakers |
-| Even out volume | Finds quiet voices the original audio misses (far from the microphone, remote callers). A volume-levelled copy is used only to detect that speech, and just those stretches are transcribed from it; everything else, and speaker identification, uses the original audio. On three real lectures this kept technical terms as accurate as without levelling, at 9–14% more time |
+| Even out volume | Finds quiet voices the original audio misses (far from the microphone, remote callers). A volume-levelled copy is used only to detect that speech, and just those stretches are transcribed from it; everything else, and speaker identification, uses the original audio. On three real lectures this kept technical terms as accurate as without levelling and found more quiet speech than levelling the whole recording, at 9–27% more time |
 | Reduce noise | Mild background-noise reduction. Leave it off for clean recordings |
 | Output formats / Save to | Which files to write, and where |
 | Include timestamps | A timestamp at the start of each turn in Word, text and Markdown |
