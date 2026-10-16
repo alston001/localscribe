@@ -60,7 +60,7 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 
 - `packaging\make_zip.py [dist folder]` takes the build folder (for example `dist_build`) and checks that `LocalScribe.exe` is in it.
 - `.gitignore` covers recordings and transcripts in every folder, not just the project root, plus partial downloads, logs and `.env`.
-- The test suite grew from 20 to 268 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
+- The test suite grew from 20 to 269 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
 
 ### 中文摘要
 
@@ -77,7 +77,7 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 - **逐字稿**：Whisper 憑空寫出、單獨成句、而且把握不到 50% 的「Thank you.」類結尾語會被刪除。換人點只差句首或句尾 1–2 個字時，整句歸給同一個人，換人點會落在句尾或停頓處。`_transcript.json` 可供日後的校對編輯器使用：較新版本的檔案會明確拒絕而不是遺失資料，存檔失敗不會毀掉舊檔。文字修改過後，字幕和試算表以修改後的文字為準。快速模式的英文標點提示只在語言設為英文時使用。
 - **穩定性**：工作執行中關閉視窗會先等它停止，太久會提示並保持開啟，不再當掉。轉檔時按 Esc 等於「取消」，視窗保留並顯示「已停止」。背景錯誤會記錄並跳出提示。輸出檔全部寫完才放到目的地，失敗不留半成品。模型下載遇到伺服器忙碌會重試。損毀的 `settings.json` 會備份成 `settings.json.bad`。`--speakers` 會拒絕 `2-`、`3-1`、`0` 這類值。`.ts` 不再被當成媒體檔。關閉提示改為「正在轉錄中」。
 - **隱私與安全**：`_transcript.json` 和 Excel 只記錄檔名，不記錄資料夾；記錄檔也只寫檔名。下載的模型會核對 SHA-256，token 只透過 https 傳送。ffmpeg 只讀本機檔案，檔案標籤無法偽造長度。CSV 與 Excel 中以 `=`、`+`、`-`、`@` 開頭的內容會加上 `'`，不會被當成公式執行。
-- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 268 個。
+- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 269 個。
 
 ## 0.1.1
 
