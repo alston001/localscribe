@@ -2,10 +2,12 @@
 
 ## Unreleased
 
+- **Even out volume no longer costs accuracy.** It used to transcribe the whole recording from volume-levelled audio. On three real lectures that recovered quiet speech the original audio missed, but it got more technical terms wrong (13 against 5 on one lecture) and put more speaker changes mid-sentence. Now Whisper always transcribes the original audio; the levelled copy is only used to find speech the original leaves without text, and just those stretches are transcribed from it. On the same lectures, terms stayed as accurate as without levelling (6 against 5) and the extra mid-sentence speaker changes fell by half or more. Quiet speech came back: 315 words on one lecture (the old way found 346) and 23 on another (the old way 64), since quiet stretches in the middle of a clip aren't filled yet. It takes 9–14% longer than without levelling.
 - **When to use a word bank.** On two more lectures about other topics, the NLP bank gained nothing and wrote a few of its terms where they probably weren't said, and with a bank transcription took 30–60% longer. The word-bank menu, the editor and the README now say to pick a bank only for recordings that use its terms.
 
 ### 中文摘要
 
+- **平衡音量不再犧牲準確度**：以前開了平衡音量，就整段用平衡後的音訊轉錄。在三堂真實的課上，這樣雖然能找回原本聽不到的小聲語音，卻讓術語錯誤變多（其中一堂 13 對 5），換人點也更常落在句子中間。現在 Whisper 一律轉錄原始音訊，平衡後的副本只用來找出原始音訊漏掉、沒有文字的語音，再只把那幾段從副本補轉。在同樣三堂課上，術語準確度和關閉時一樣（6 對 5），換人點落在句中的增加幅度降到一半以下；小聲語音在一堂課找回 315 個字（原本做法找回 346 個），另一堂找回 23 個（原本 64 個），因為片段中間的小聲空檔目前還沒有補轉。比不開平衡音量多花 9–14% 的時間。
 - **詞庫的使用時機**：在另外兩堂主題不同的課上，NLP 詞庫沒有幫助，還可能把幾個詞寫進沒說的地方，轉錄也慢了三到六成。詞庫選單、編輯視窗和 README 現在都會說明：只在錄音真的會講到這些詞時才選詞庫。
 
 ## 0.1.2

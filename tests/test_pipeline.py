@@ -371,3 +371,28 @@ def test_detect_survives_a_broken_cuda_setup(monkeypatch):
         assert dev.detect().cuda is False
     finally:
         dev.detect.cache_clear()
+
+
+# ---- "Even out volume" levels only the copy that finds quiet speech ----------------------
+def test_levelling_feeds_whisper_the_original_and_finds_quiet_speech_in_a_copy(fake_models, monkeypatch):
+    loads, seen = [], {}
+
+    def load(path, normalize=False, denoise=False, **kw):
+        loads.append((normalize, denoise))
+        return np.full(16000 * 10, 1.0 if normalize else 0.0, np.float32)
+
+    def transcribe(self, audio, language=None, quiet=None, **kw):
+        seen["whisper"], seen["quiet"] = float(audio[0]), None if quiet is None else float(quiet[0])
+        return AsrResult("en", 1.0, list(WORDS))
+
+    def diarize(self, audio, count, cancel=None, progress=None):
+        seen["diarize"] = float(audio[0])
+        return list(FakePyannote.turns)
+
+    monkeypatch.setattr(pipeline, "load_audio", load)
+    monkeypatch.setattr(FakeTranscriber, "transcribe", transcribe)
+    monkeypatch.setattr(FakePyannote, "diarize", diarize)
+    engine = make_engine(fake_models, device="cpu")
+    engine.transcribe_file(fake_models / "talk.wav", JobOptions(normalize=True))
+    assert seen == {"whisper": 0.0, "quiet": 1.0, "diarize": 0.0}  # original, levelled, original
+    assert loads == [(False, False), (True, False)]  # no third decode just for diarization

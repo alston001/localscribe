@@ -337,3 +337,71 @@ def test_a_stretch_of_exactly_30_seconds_is_a_gap():
     words = [Word(0.0, 10.0, " one", 0.9), Word(40.0, 41.0, " two.", 0.9)]
     assert text_gaps(words, 41.0, []) == [(10.0, 40.0, False)]
     assert text_gaps(words, 41.0, [], min_length=30.01) == []
+
+
+# ---- "Even out volume": transcribe the original, fill quiet speech from the levelled copy ----
+# On three real lectures, Whisper on levelled audio made more terms wrong and put more speaker
+# changes mid-sentence, but levelling let the voice detector hear quiet stretches (up to 346
+# words in one lecture) that the original audio left out entirely.
+ORIGINAL, LEVELLED = 0.0, 1.0  # the fake audio's sample value tells the copies apart
+
+
+class QuietlySpoken:
+    """In the original audio Whisper hears only the loud part (before 15 s); in the levelled
+    copy it hears everything. A word every second either way."""
+
+    def __init__(self, quiet_text=" quiet"):
+        self.calls, self.quiet_text = [], quiet_text
+
+    def transcribe(self, audio, clip_timestamps, **options):
+        levelled = float(audio[0]) == LEVELLED
+        self.calls.append(("levelled" if levelled else "original", list(clip_timestamps), options.get("hotwords")))
+        segments = []
+        for start, end in zip(clip_timestamps[::2], clip_timestamps[1::2]):
+            loud = start < 15
+            if not (loud or levelled) or (not loud and self.quiet_text is None):
+                continue
+            words = [FakeWord(float(t), float(t) + 0.6, " loud" if loud else self.quiet_text)
+                     for t in np.arange(start + 0.2, end - 0.6)]
+            segments.append(FakeSegment(words[0].start, words[-1].end, words))
+        info = types.SimpleNamespace(language=options.get("language") or "en", language_probability=1.0)
+        return iter(segments), info
+
+
+def quiet_setup(monkeypatch, model):
+    heard = {ORIGINAL: [(1.0, 11.0)], LEVELLED: [(1.0, 11.0), (20.0, 30.0)]}
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: heard[float(audio[0])])
+    transcriber = object.__new__(asr.Transcriber)
+    transcriber.model = model
+    original = np.full(16000 * 32, ORIGINAL, np.float32)
+    return transcriber, original, np.full(16000 * 32, LEVELLED, np.float32)
+
+
+def test_quiet_speech_only_levelling_finds_is_filled_from_the_levelled_copy(monkeypatch):
+    transcriber, original, levelled = quiet_setup(monkeypatch, QuietlySpoken())
+    result = transcriber.transcribe(original, language="en", quiet=levelled)
+    assert text(result.words) == " loud" * 10 + " quiet" * 10  # the loud part from the original, once
+    # The levelled copy is decoded only where the original left the speech without text.
+    assert transcriber.model.calls == [("original", [1.0, 11.0], None), ("levelled", [20.0, 30.0], None)]
+    assert (20.0, 30.0) in result.speech  # so lost-speech checks know about it
+
+
+def test_without_levelling_nothing_changes(monkeypatch):
+    transcriber, original, _ = quiet_setup(monkeypatch, QuietlySpoken())
+    result = transcriber.transcribe(original, language="en")
+    assert text(result.words) == " loud" * 10 and result.speech == [(1.0, 11.0)]
+    assert [c[0] for c in transcriber.model.calls] == ["original"]
+
+
+def test_quiet_speech_nothing_could_transcribe_still_counts_as_speech(monkeypatch):
+    transcriber, original, levelled = quiet_setup(monkeypatch, QuietlySpoken(quiet_text=None))
+    result = transcriber.transcribe(original, language="en", quiet=levelled)
+    assert text(result.words) == " loud" * 10
+    assert (20.0, 30.0) in result.speech  # left for the lost-speech warning
+
+
+def test_quiet_fills_are_decoded_without_the_word_bank(monkeypatch):
+    # The bank's own lost-speech fallback decodes without it too; fills must not bring back its side effects.
+    transcriber, original, levelled = quiet_setup(monkeypatch, QuietlySpoken())
+    transcriber.transcribe(original, language="en", hotwords="Quuxian", quiet=levelled)
+    assert transcriber.model.calls[-1] == ("levelled", [20.0, 30.0], None)
