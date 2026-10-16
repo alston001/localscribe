@@ -4,27 +4,39 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..core.transcript import Transcript
+from ..core.transcript import Gap, Transcript
 from ..i18n import tr_in
-from .common import ExportOptions, clock, metadata, subtitle_cues
+from .common import (UNCERTAIN_MARK, ExportOptions, clock, gap_text, marked_text, metadata, sentences, subtitle_cues,
+                     with_gaps)
+
+
+def _legend(options: ExportOptions) -> list[str]:
+    return [tr_in(options.lang, "exp_uncertain_note_mark", mark=UNCERTAIN_MARK)] if options.mark_uncertain else []
 
 
 def export_txt(t: Transcript, path: Path, options: ExportOptions) -> None:
     meta = " · ".join(f"{k}: {v}" for k, v in metadata(t, options.lang)[:3])
-    lines = [t.source_name, meta, ""]
-    for seg in t.segments:
-        stamp = f"[{clock(seg.start)}] " if options.timestamps else ""
-        lines += [f"{stamp}{t.speaker_name(seg.speaker)}: {seg.text}", ""]
+    lines = [t.source_name, meta, *_legend(options), ""]
+    for item in with_gaps(t):
+        if isinstance(item, Gap):
+            lines += [gap_text(item, options.lang), ""]
+            continue
+        stamp = f"[{clock(item.start)}] " if options.timestamps else ""
+        lines += [f"{stamp}{t.speaker_name(item.speaker)}: {marked_text(item, options)}", ""]
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
 def export_md(t: Transcript, path: Path, options: ExportOptions) -> None:
     lines = [f"# {t.source_name}", ""]
     lines += [f"- **{k}**: {v}" for k, v in metadata(t, options.lang)]
-    lines += ["", f"*{tr_in(options.lang, 'exp_generated')}*", "", "---", ""]
-    for seg in t.segments:
-        stamp = f" `{clock(seg.start)}`" if options.timestamps else ""
-        lines += [f"**{t.speaker_name(seg.speaker)}**{stamp}  ", seg.text, ""]
+    note = sentences(tr_in(options.lang, "exp_generated"), *_legend(options))
+    lines += ["", f"*{note}*", "", "---", ""]
+    for item in with_gaps(t):
+        if isinstance(item, Gap):
+            lines += [f"*{gap_text(item, options.lang)}*", ""]
+            continue
+        stamp = f" `{clock(item.start)}`" if options.timestamps else ""
+        lines += [f"**{t.speaker_name(item.speaker)}**{stamp}  ", marked_text(item, options), ""]
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 

@@ -97,6 +97,12 @@ STRINGS: dict[str, tuple[str, str]] = {
     "fmt_xlsx": ("Excel 表格 (.xlsx)", "Excel (.xlsx)"),
     "fmt_csv": ("CSV 表格 (.csv)", "CSV (.csv)"),
     "timestamps": ("包含時間戳記", "Include timestamps"),
+    "mark_uncertain": ("標記不確定的字詞", "Mark unsure words"),
+    "mark_uncertain_tip": ("標出 Whisper 沒把握、可能聽錯的字，方便回去重聽：Word 以黃色標示，txt 和 md 在字後加 (?)，"
+                           "Excel 和 CSV 多一欄列出。字幕不標記。很有把握卻聽錯的字不會被標出。",
+                           "Marks words Whisper was unsure of, so you know where to listen again: highlighted in "
+                           "Word, followed by (?) in txt and md, listed in an extra column in Excel and CSV. "
+                           "Subtitles stay unmarked. A word misheard with confidence is not marked."),
     "save_to": ("儲存位置", "Save to"),
     "save_same": ("與原檔相同的資料夾", "Same folder as the original"),
     "save_custom": ("指定資料夾", "This folder"),
@@ -276,6 +282,11 @@ STRINGS: dict[str, tuple[str, str]] = {
     "exp_page": ("第 {n} 頁", "Page {n}"),
     "exp_generated": ("由 LocalScribe 在本機離線產生，請在使用前校對。",
                       "Generated offline by LocalScribe. Please proofread before use."),
+    "exp_gap_silence": ("[無語音 {start}–{end}]", "[No speech {start}–{end}]"),
+    "exp_gap_speech": ("[偵測到語音，但沒有轉出文字 {start}–{end}]", "[Speech detected, no text {start}–{end}]"),
+    "exp_uncertain": ("不確定的字詞", "Unsure words"),
+    "exp_uncertain_note_mark": ("Whisper 沒把握的字後面標有 {mark}。", "{mark} follows words Whisper was unsure of."),
+    "exp_uncertain_note_highlight": ("Whisper 沒把握的字以黃色標出。", "Words Whisper was unsure of are highlighted in yellow."),
 }
 
 

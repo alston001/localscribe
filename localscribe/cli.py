@@ -59,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--normalize", action="store_true", help="even out loud and quiet voices")
     p.add_argument("--denoise", action="store_true", help="reduce background noise")
     p.add_argument("--no-timestamps", action="store_true")
+    p.add_argument("--mark-uncertain", action="store_true",
+                   help="mark words Whisper was unsure of: (?) in txt/md, yellow in docx, a column in xlsx/csv")
     p.add_argument("--speaker-label", default="Speaker")
     p.add_argument("--hotwords", default="", help="names and terms to help spelling")
     p.add_argument("--vocabulary", default="", metavar="NAME",
@@ -102,7 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     opts = JobOptions(language=None if args.language == "auto" else args.language,
                       speakers=args.speakers, normalize=args.normalize,
                       denoise=args.denoise, hotwords=join_terms(terms), speaker_prefix=args.speaker_label)
-    export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps)
+    export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps,
+                                   mark_uncertain=args.mark_uncertain)
 
     def show(p: Progress) -> None:
         bar = "#" * int(p.overall * 30)

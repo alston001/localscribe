@@ -170,7 +170,11 @@ class MainWindow(QMainWindow):
             grid.addWidget(box, i // 2, i % 2)
         self.chk_timestamps = QCheckBox()
         self.chk_timestamps.toggled.connect(self._on_option_changed)
-        grid.addWidget(self.chk_timestamps, (len(FORMATS) + 1) // 2, 0, 1, 2)
+        self.chk_uncertain = QCheckBox()
+        self.chk_uncertain.toggled.connect(self._on_option_changed)
+        # One row for both: another row would give the default window a scroll bar.
+        grid.addWidget(self.chk_timestamps, (len(FORMATS) + 1) // 2, 0)
+        grid.addWidget(self.chk_uncertain, (len(FORMATS) + 1) // 2, 1)
         opts.addWidget(self.grp_formats)
 
         self.grp_save = QGroupBox()
@@ -201,7 +205,7 @@ class MainWindow(QMainWindow):
         right.addWidget(self.btn_start)
         holder = QWidget()
         holder.setLayout(right)
-        holder.setFixedWidth(360)
+        holder.setFixedWidth(372)  # room for "Mark unsure words" beside "Include timestamps"
         root.addWidget(holder)
 
         self.lbl_device = QLabel()
@@ -230,9 +234,10 @@ class MainWindow(QMainWindow):
             box.blockSignals(True)
             box.setChecked(fmt in s.formats)
             box.blockSignals(False)
-        self.chk_timestamps.blockSignals(True)
-        self.chk_timestamps.setChecked(s.timestamps)
-        self.chk_timestamps.blockSignals(False)
+        for box, value in ((self.chk_timestamps, s.timestamps), (self.chk_uncertain, s.mark_uncertain)):
+            box.blockSignals(True)
+            box.setChecked(value)
+            box.blockSignals(False)
         self.rad_same.blockSignals(True)
         (self.rad_same if s.save_mode == "same" else self.rad_custom).setChecked(True)
         self.rad_same.blockSignals(False)
@@ -273,6 +278,8 @@ class MainWindow(QMainWindow):
         for fmt, box in self.chk_formats.items():
             box.setText(tr(f"fmt_{fmt}"))
         self.chk_timestamps.setText(tr("timestamps"))
+        self.chk_uncertain.setText(tr("mark_uncertain"))
+        self.chk_uncertain.setToolTip(tr("mark_uncertain_tip"))
         self.grp_save.setTitle(tr("save_to"))
         self.rad_same.setText(tr("save_same"))
         self.rad_custom.setText(tr("save_custom"))
@@ -330,6 +337,7 @@ class MainWindow(QMainWindow):
         s.language = self.cmb_language.currentData() or "en"
         s.formats = [f for f, box in self.chk_formats.items() if box.isChecked()]
         s.timestamps = self.chk_timestamps.isChecked()
+        s.mark_uncertain = self.chk_uncertain.isChecked()
         s.save_mode = "same" if self.rad_same.isChecked() else "custom"
         self._update_speaker_widgets()
         self._update_status_bar()

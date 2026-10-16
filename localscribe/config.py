@@ -56,6 +56,7 @@ class Settings:
     denoise: bool = False
     formats: list[str] = field(default_factory=lambda: ["docx", "txt"])
     timestamps: bool = True
+    mark_uncertain: bool = False
     save_mode: str = "same"        # same | custom
     save_dir: str = ""
     convert_format: str = "m4a"
@@ -135,7 +136,7 @@ class Settings:
 
     def export_options(self, ui_language: str) -> ExportOptions:
         return ExportOptions(lang=ui_language, timestamps=self.timestamps,
-                             subtitle_speakers=self.subtitle_speakers)
+                             subtitle_speakers=self.subtitle_speakers, mark_uncertain=self.mark_uncertain)
 
     def matches_preset(self, name: str) -> bool:
         preset = PRESETS.get(name)
