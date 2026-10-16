@@ -202,10 +202,13 @@ def uncovered(clip: tuple[float, float], words: list[Word], gap: float = UNCOVER
 
 def fill_gaps(parts: list[tuple[float, float]], kept: list[Word], other: list[Word]) -> list[Word]:
     """The words of `other` (the same clip decoded again) whose middle falls in one of `parts`,
-    without one that repeats the kept word right next to the part (the same word, timed apart)."""
+    without one that repeats the kept word right next to the part (the same word, timed apart).
+    Sign-offs are dropped from `other` first: a piece of one ("very much.") would get past
+    drop_sign_offs later."""
     def bare(word: Word) -> str:
         return re.sub(r"[^\w']", "", word.text.lower())
 
+    other = drop_sign_offs(sorted(other, key=lambda w: w.start))
     filled = []
     for start, end in parts:
         picked = [w for w in other if start <= (w.start + w.end) / 2 < end]

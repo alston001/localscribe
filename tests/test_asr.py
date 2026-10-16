@@ -265,6 +265,15 @@ def test_gaps_are_filled_from_the_second_decode_without_repeats():
     assert [w.text for w in filled] == [" First,", " we", " see", " Then", " more."]
 
 
+def test_no_piece_of_an_invented_sign_off_fills_a_gap():
+    # The second decode's "Thank you very much." straddled the kept text: "very much." alone would
+    # have filled the gap after it, and drop_sign_offs could no longer recognise it.
+    kept = [Word(244.0, 244.5, " Cosine", 0.9), Word(253.7, 254.6, " vectors.", 0.9)]
+    other = [Word(247.4, 248.8, " Thank", 0.14), Word(248.8, 250.2, " you", 1.0), Word(250.2, 259.9, " very", 0.02),
+             Word(259.9, 260.0, " much.", 1.0)]
+    assert asr.fill_gaps([(237.6, 244.0), (254.6, 260.3)], kept, other) == []
+
+
 class BankShy:
     """A model that, given hotwords, writes one word in the middle of each clip; without, a word
     every second all through it."""
@@ -322,8 +331,7 @@ def test_a_clip_decoded_again_keeps_no_sign_off_of_the_first_decode(monkeypatch)
     transcriber = object.__new__(asr.Transcriber)
     transcriber.model = SignsOff()
     result = transcriber.transcribe(np.zeros(16000 * 25, np.float32), language="en", hotwords="Quuxian")
-    assert text(result.words) == " Thank you. Real words."
-    assert text(drop_sign_offs(result.words)) == " Real words."
+    assert text(result.words) == " Real words."  # each decode's sign-off dropped whole
 
 
 def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
