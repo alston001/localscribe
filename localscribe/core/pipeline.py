@@ -190,12 +190,12 @@ class Engine:
         self.release_diarizer()
 
     # ---- steps ---------------------------------------------------------------
-    def _asr(self, audio, opts: JobOptions, device: str, report: _Reporter, cancel) -> AsrResult:
+    def _asr(self, audio, opts: JobOptions, device: str, report: _Reporter, cancel, quiet=None) -> AsrResult:
         transcriber = self._transcriber_for(device, report, cancel)
         report("transcribe", 0.0, self.whisper_name())
         return transcriber.transcribe(
             audio, language=opts.language, hotwords=opts.hotwords.strip() or None,
-            progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel)
+            progress=lambda f: report("transcribe", f, self.whisper_name()), cancel=cancel, quiet=quiet)
 
     def _run_with_gpu_fallback(self, device: str, step: Callable[[str], T], what: str) -> tuple[T, str]:
         """step(device), retried once on the CPU when the GPU fails and the user left the
@@ -222,8 +222,10 @@ class Engine:
         report("decode", 0.0)
         started = time.monotonic()
         warnings: list[dict] = []
-        audio = load_audio(path, normalize=opts.normalize, denoise=opts.denoise, cancel=cancel,
-                           warnings=warnings)
+        audio = load_audio(path, denoise=opts.denoise, cancel=cancel, warnings=warnings)
+        # "Even out volume" levels a copy that only finds quiet speech the original leaves out;
+        # Whisper transcribes the original (see Transcriber.transcribe).
+        quiet = load_audio(path, normalize=True, denoise=opts.denoise, cancel=cancel) if opts.normalize else None
         duration = len(audio) / SAMPLE_RATE
         timings["decode"] = time.monotonic() - started
         if duration < 0.3:
@@ -233,7 +235,8 @@ class Engine:
         device = self.device()
         started = time.monotonic()
         asr, device = self._run_with_gpu_fallback(
-            device, lambda on: self._asr(audio, opts, on, report, cancel), "transcription")
+            device, lambda on: self._asr(audio, opts, on, report, cancel, quiet), "transcription")
+        quiet = None  # a second copy of the whole recording: free it before speaker identification
         timings["transcribe"] = time.monotonic() - started
         report("transcribe", 1.0)
         if cancel is not None and cancel.is_set():
@@ -254,9 +257,9 @@ class Engine:
                 self.release_transcriber()  # make room for pyannote on smaller GPUs
             started = time.monotonic()
             report("diarize", 0.0, diarizer_name)
-            if opts.normalize or opts.denoise:
-                # Clean-up filters help recognition but distort voice characteristics
-                # (volume levelling made a 3-person panel cluster as 4), so diarize the original.
+            if opts.denoise:
+                # Noise reduction helps recognition but distorts voice characteristics (volume
+                # levelling once made a 3-person panel cluster as 4), so diarize the original.
                 audio = load_audio(path, cancel=cancel)
 
             def diarize_on(on_device: str) -> tuple[str, list[Turn]]:

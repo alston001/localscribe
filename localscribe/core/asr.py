@@ -230,6 +230,17 @@ def _words_of(seg) -> list[Word]:
     return []
 
 
+def _union(regions: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Overlapping or touching time regions merged, in order."""
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(regions):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def _in_clip(words: list[Word], clips: list[tuple[float, float]]) -> dict[int, list[Word]]:
     """`words` by the index of the clip their middle falls in."""
     starts = [start for start, _ in clips]
@@ -275,10 +286,16 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray, language: str | None = None,
                    hotwords: str | None = None,
                    progress: Callable[[float], None] | None = None,
-                   cancel: threading.Event | None = None) -> AsrResult:
+                   cancel: threading.Event | None = None, quiet: np.ndarray | None = None) -> AsrResult:
         """Decodes clip by clip (see speech_clips): sequential decoding keeps punctuation and word
         timing best, and speaker attribution depends on both. Batched decoding ("fast mode", ~3x
-        faster on a GPU) was removed: in tests it dropped whole sentences without a warning."""
+        faster on a GPU) was removed: in tests it dropped whole sentences without a warning.
+
+        `quiet` is a volume-levelled copy of `audio` ("Even out volume"). It is only used to find
+        speech the original leaves without text, which is then decoded from the copy (see
+        _fill_quiet). On three real lectures, Whisper on levelled audio got more terms wrong and put
+        more speaker changes mid-sentence, while levelling let the voice detector hear quiet
+        stretches the original lost entirely (up to 346 words in one lecture)."""
         duration = len(audio) / SAMPLE_RATE
         options = dict(language=language or None, word_timestamps=True, beam_size=5,
                        hotwords=hotwords or None)
@@ -287,6 +304,7 @@ class Transcriber:
             return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
         pieces, info = self._decode_clips(audio, clips, options)
         speech = list(clips)
+        scale = 1.0 if quiet is None else 0.9  # the rest is for the quiet stretches
 
         words: list[Word] = []
         for piece, done in pieces:  # generator: decoding happens while iterating
@@ -294,9 +312,41 @@ class Transcriber:
                 raise Cancelled()
             words += piece
             if progress is not None and duration > 0:
-                progress(done)
+                progress(done * scale)
+        if quiet is not None:
+            filled, heard = self._fill_quiet(quiet, words, options, info.language, cancel)
+            words += filled
+            speech = _union(speech + heard)
+            if progress is not None:
+                progress(1.0)
         words.sort(key=lambda w: w.start)
         return AsrResult(info.language, float(info.language_probability), words, speech)
+
+    def _fill_quiet(self, quiet: np.ndarray, words: list[Word], options: dict, language: str,
+                    cancel: threading.Event | None) -> tuple[list[Word], list[tuple[float, float]]]:
+        """(words to add, the speech the levelled copy let the voice detector hear). Clips of the
+        levelled copy whose parts `words` leave without text (see uncovered) are decoded from the
+        copy, without the word bank as in its own fallback, and those parts filled (see fill_gaps)."""
+        clips = speech_clips(quiet)
+        by_clip = _in_clip(words, clips)
+        gaps = {k: uncovered(clip, by_clip.get(k, [])) for k, clip in enumerate(clips)}
+        todo = [k for k, parts in gaps.items() if parts]
+        if not todo:
+            return [], clips
+        plain = {**options, "hotwords": None, "language": language}
+        found, _ = self.model.transcribe(quiet, vad_filter=False, clip_timestamps=[t for k in todo for t in clips[k]],
+                                         condition_on_previous_text=False, **plain)
+        again: list[Word] = []
+        for seg in found:  # generator: decoding happens while iterating
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            again += _words_of(seg)
+        redone = _in_clip(again, [clips[k] for k in todo])
+        filled: list[Word] = []
+        for n, k in enumerate(todo):
+            kept = drop_sign_offs(sorted(by_clip.get(k, []), key=lambda w: w.start))
+            filled += fill_gaps(gaps[k], kept, redone.get(n, []))
+        return filled, clips
 
     def _decode_clips(self, audio: np.ndarray, clips: list[tuple[float, float]], options: dict):
         """(words in pieces, each with the share of the work done so far, info). Every clip is
