@@ -302,6 +302,30 @@ def test_speech_a_word_bank_left_out_is_decoded_again_without_it(monkeypatch):
     assert seen == sorted(seen) and seen[-1] == 1.0
 
 
+class SignsOff:
+    """With hotwords, a sign-off in the middle of the clip; without, another one and then speech."""
+
+    def transcribe(self, audio, clip_timestamps, hotwords=None, **options):
+        start, end = clip_timestamps[0], clip_timestamps[1]
+        spec = ([(" Thank", 0.1), (" you", 0.9), (" for", 0.3), (" watching.", 0.8)] if hotwords
+                else [(" Thank", 0.1), (" you.", 0.9), (" Real", 0.9), (" words.", 0.9)])
+        words = [FakeWord(start + 5 + 0.3 * i + (0.1 if not hotwords else 0), start + 5.25 + 0.3 * i, w, p)
+                 for i, (w, p) in enumerate(spec)]
+        info = types.SimpleNamespace(language=options.get("language") or "en", language_probability=1.0)
+        return iter([FakeSegment(words[0].start, words[-1].end, words)]), info
+
+
+def test_a_clip_decoded_again_keeps_no_sign_off_of_the_first_decode(monkeypatch):
+    # The two decodes' sign-offs, merged by time, would read "Thank Thank you you. for watching."
+    # and get past drop_sign_offs.
+    monkeypatch.setattr(asr, "speech_clips", lambda audio: [(1.0, 21.0)])
+    transcriber = object.__new__(asr.Transcriber)
+    transcriber.model = SignsOff()
+    result = transcriber.transcribe(np.zeros(16000 * 25, np.float32), language="en", hotwords="Quuxian")
+    assert text(result.words) == " Thank you. Real words."
+    assert text(drop_sign_offs(result.words)) == " Real words."
+
+
 def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
     used = {}
 

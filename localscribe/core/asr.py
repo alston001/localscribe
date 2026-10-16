@@ -341,25 +341,30 @@ class Transcriber:
                     continue
                 for seg in found if found is not None else decode(group, plain)[0]:
                     words = _words_of(seg)
-                    if bank and group is groups[0]:
-                        banked += words
+                    if bank and group is groups[0]:  # held back until checked (see below)
+                        banked, words = banked + words, []
                     covered = sum(max(0.0, min(end, seg.end) - start) for start, end in group)
                     yield words, min((done + covered) / total, 1.0) * share
                 done += sum(end - start for start, end in group)
-            if bank:
-                by_clip = _in_clip(banked, groups[0])
-                gaps = {k: uncovered(clip, by_clip.get(k, [])) for k, clip in enumerate(groups[0])}
-                redo = [k for k, parts in gaps.items() if parts]
-                if redo:
-                    again, reached = [], share
-                    for seg in decode([groups[0][k] for k in redo], plain)[0]:
-                        again += _words_of(seg)
-                        reached = max(reached, share + (1 - share) * min(seg.end / groups[0][redo[-1]][1], 1.0))
-                        yield [], reached
-                    redone = _in_clip(again, [groups[0][k] for k in redo])
-                    for n, k in enumerate(redo):
-                        kept = drop_sign_offs(sorted(by_clip.get(k, []), key=lambda w: w.start))
-                        yield fill_gaps(gaps[k], kept, redone.get(n, [])), reached
-                yield [], 1.0
+            if not bank:
+                return
+            by_clip = _in_clip(banked, groups[0])
+            gaps = {k: uncovered(clip, by_clip.get(k, [])) for k, clip in enumerate(groups[0])}
+            redo = {k: n for n, k in enumerate(k for k, parts in gaps.items() if parts)}
+            again, reached = [], share
+            if redo:
+                last_end = groups[0][max(redo)][1]
+                for seg in decode([groups[0][k] for k in redo], plain)[0]:
+                    again += _words_of(seg)
+                    reached = max(reached, share + (1 - share) * min(seg.end / last_end, 1.0))
+                    yield [], reached
+            redone = _in_clip(again, [groups[0][k] for k in redo])
+            for k in range(len(groups[0])):
+                words = by_clip.get(k, [])
+                if k in redo:  # only what survives drop_sign_offs, or two decodes' sign-offs could interleave
+                    kept = drop_sign_offs(sorted(words, key=lambda w: w.start))
+                    words = kept + fill_gaps(gaps[k], kept, redone.get(redo[k], []))
+                yield words, reached
+            yield [], 1.0
 
         return pieces(), info
