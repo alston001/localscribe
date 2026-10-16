@@ -311,6 +311,23 @@ def test_lost_speech_hidden_by_invented_thanks_still_warns(fake_models, monkeypa
     assert transcript.warnings == [{"key": "warn_lost_speech", "times": "0:04–0:55"}]
 
 
+
+def test_gaps_reach_the_transcript_with_what_the_warning_found(fake_models, monkeypatch):
+    long_recording(monkeypatch, seconds=120)
+    FakeTranscriber.speech = [(0.0, 4.0), (4.5, 32.0), (32.5, 60.0), (60.2, 75.0)]  # WORDS stop at 3.9 s
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == [{"key": "warn_lost_speech", "times": "0:04–1:15"}]
+    assert [(g.start, g.end, g.speech) for g in transcript.gaps] == [(3.9, 75.0, True), (75.0, 120.0, False)]
+
+
+def test_lost_speech_is_looked_for_once(fake_models, monkeypatch):
+    calls = []
+    monkeypatch.setattr(pipeline, "lost_speech", lambda speech, words: calls.append(1) or [])
+    make_engine(fake_models, device="cpu").transcribe_file(fake_models / "a.wav",
+                                                           JobOptions(speakers=SpeakerCount(exact=1)))
+    assert calls == [1]  # the warning and the gap markers share one result
+
 # ---- sign-offs Whisper invents ------------------------------------------------------
 def test_invented_thank_you_is_removed(fake_models):
     FakeTranscriber.words = WORDS[:2] + [Word(1.0, 1.2, " Thank", 0.07), Word(1.2, 1.4, " you.", 0.99)] + WORDS[2:]

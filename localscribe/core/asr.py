@@ -40,15 +40,8 @@ def lost_speech(speech: list[tuple[float, float]], words: list[Word], min_speech
     Real silence holds no detected speech, so it never counts, and scattered noises in a long
     quiet stretch (a cough, a chair) are cut apart by the pauses between them.
     """
-    gaps, edge = [], 0.0
-    for word in sorted(words, key=lambda w: w.start):
-        if word.start > edge:
-            gaps.append((edge, word.start))
-        edge = max(edge, word.end)
-    gaps.append((edge, math.inf))
-
     stretches = []
-    for gap_start, gap_end in gaps:
+    for gap_start, gap_end in _without_words(words, math.inf):
         if gap_end - gap_start < min_speech:
             continue
         run = None  # [start, end, seconds of speech]
@@ -64,6 +57,43 @@ def lost_speech(speech: list[tuple[float, float]], words: list[Word], min_speech
             run = [start, end, end - start]
         if run is not None and run[2] >= min_speech:
             stretches.append((run[0], run[1]))
+    return stretches
+
+
+def text_gaps(words: list[Word], duration: float, lost: list[tuple[float, float]],
+              min_length: float = 30.0) -> list[tuple[float, float, bool]]:
+    """Stretches of at least `min_length` seconds in which no words came out, as
+    (start, end, speech heard). Where lost_speech found speech inside one (`lost`), that part
+    is a gap with speech heard, and the silence on either side counts on its own.
+
+    30 s is what lost_speech needs, so both kinds use the same bar. Shorter pauses (writing on
+    the board, a long think) are common in classes and would only clutter the text.
+    """
+    gaps = []
+    for start, end in _without_words(words, duration):
+        cursor = start
+        for heard_start, heard_end in lost:
+            heard_start, heard_end = max(heard_start, start), min(heard_end, end)
+            if heard_end <= heard_start:
+                continue
+            if heard_start - cursor >= min_length:
+                gaps.append((cursor, heard_start, False))
+            gaps.append((heard_start, heard_end, True))
+            cursor = heard_end
+        if end - cursor >= min_length:
+            gaps.append((cursor, end, False))
+    return gaps
+
+
+def _without_words(words: list[Word], end: float) -> list[tuple[float, float]]:
+    """The stretches between 0 and `end` that no word covers."""
+    stretches, edge = [], 0.0
+    for word in sorted(words, key=lambda w: w.start):
+        if word.start > edge:
+            stretches.append((edge, word.start))
+        edge = max(edge, word.end)
+    if end > edge:
+        stretches.append((edge, end))
     return stretches
 
 
