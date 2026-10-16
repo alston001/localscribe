@@ -40,6 +40,14 @@ class Segment:
 
 
 @dataclass
+class Gap:
+    """A long stretch in which no text came out (see asr.text_gaps)."""
+    start: float
+    end: float
+    speech: bool = False  # the voice detector heard speech there, so something may be missing
+
+
+@dataclass
 class Transcript:
     source: str  # the recording's file name (files before 0.2 hold a full path; use source_name)
     duration: float
@@ -51,6 +59,9 @@ class Transcript:
     segments: list[Segment]
     # Problems that degraded this transcript without stopping it: {"key": i18n key, **format args}
     warnings: list[dict] = field(default_factory=list)
+    # Long stretches without text, in time order. Shown only while no segment overlaps them
+    # (an editor may fill one in), like words that no longer match their text.
+    gaps: list[Gap] = field(default_factory=list)
 
     @property
     def source_name(self) -> str:
@@ -66,6 +77,8 @@ class Transcript:
             seg["start"], seg["end"] = round(seg["start"], 3), round(seg["end"], 3)
             for w in seg["words"]:
                 w["start"], w["end"], w["prob"] = round(w["start"], 3), round(w["end"], 3), round(w["prob"], 3)
+        for gap in data["gaps"]:
+            gap["start"], gap["end"] = round(gap["start"], 3), round(gap["end"], 3)
         return data
 
     def save(self, path: Path) -> None:
@@ -87,7 +100,8 @@ class Transcript:
             raise UserError("err_transcript_newer", version=version)
         segments = [_known(Segment, {**s, "words": [_known(TWord, w) for w in s.get("words", [])]})
                     for s in data["segments"]]
-        return _known(cls, {**data, "segments": segments})
+        gaps = [_known(Gap, g) for g in data.get("gaps", [])]
+        return _known(cls, {**data, "segments": segments, "gaps": gaps})
 
 
 def _known(cls, data: dict):

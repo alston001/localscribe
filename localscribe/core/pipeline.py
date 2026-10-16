@@ -18,12 +18,12 @@ from typing import Callable, TypeVar
 from .. import __version__
 from . import device as dev
 from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
-from .asr import AsrResult, drop_sign_offs, lost_speech
+from .asr import AsrResult, drop_sign_offs, lost_speech, text_gaps
 from .diarization import SpeakerCount, Turn
 from .errors import Cancelled, UserError
 from .media import SAMPLE_RATE, load_audio, mmss
 from .models import ModelStore
-from .transcript import Segment, Transcript, TWord
+from .transcript import Gap, Segment, Transcript, TWord
 
 # Punctuated text nudges Whisper to keep punctuation in fast (batched) mode, where each
 # 30 s chunk is decoded without context. Sequential mode keeps punctuation unaided.
@@ -292,13 +292,14 @@ class Engine:
                 torch.cuda.empty_cache()  # hand cached memory back before Whisper reloads
             timings["diarize"] = time.monotonic() - started
 
-        transcript = build_transcript(path, duration, asr, turns, opts)
+        lost = lost_speech(asr.speech, asr.words)  # for the warning and the gap markers
+        transcript = build_transcript(path, duration, asr, turns, opts, lost)
         if self._gpu_failed:
             warnings.append({"key": "warn_gpu_fallback"})
         elif self.settings.device == "cuda" and device == "cpu":
             self.log("Settings ask for the GPU, but no CUDA GPU is available; running on CPU")
             warnings.append({"key": "warn_cuda_unavailable"})
-        warnings += _lost_speech_warnings(asr)
+        warnings += _lost_speech_warnings(lost)
         if diarize:
             warnings += _speaker_warnings(turns, len(transcript.speakers), opts.speakers)
         transcript.warnings = warnings
@@ -312,8 +313,7 @@ class Engine:
         return transcript
 
 
-def _lost_speech_warnings(asr: AsrResult) -> list[dict]:
-    stretches = lost_speech(asr.speech, asr.words)
+def _lost_speech_warnings(stretches: list[tuple[float, float]]) -> list[dict]:
     if not stretches:
         return []
     return [{"key": "warn_lost_speech", "times": ", ".join(f"{mmss(s)}–{mmss(e)}" for s, e in stretches)}]
@@ -329,7 +329,8 @@ def _speaker_warnings(turns: list[Turn], found: int, count: SpeakerCount) -> lis
 
 
 def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Turn],
-                     opts: JobOptions) -> Transcript:
+                     opts: JobOptions, lost: list[tuple[float, float]] = ()) -> Transcript:
+    """`lost`: where speech was heard but no words came out (asr.lost_speech)."""
     words = asr.words
     if turns:
         labels, coverage = assign_speakers(words, turns)
@@ -360,4 +361,5 @@ def build_transcript(path: Path, duration: float, asr: AsrResult, turns: list[Tu
                   "speakers_requested": {"exact": opts.speakers.exact, "min": opts.speakers.min,
                                          "max": opts.speakers.max},
                   "normalize": opts.normalize, "denoise": opts.denoise},
-        speakers=speakers, segments=segments)
+        speakers=speakers, segments=segments,
+        gaps=[Gap(start, end, heard) for start, end, heard in text_gaps(words, duration, list(lost))])

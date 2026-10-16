@@ -6,7 +6,7 @@ import types
 import numpy as np
 
 from localscribe.core import asr
-from localscribe.core.asr import Word, drop_sign_offs, lost_speech
+from localscribe.core.asr import Word, drop_sign_offs, lost_speech, text_gaps
 
 
 def talk(start: float, end: float) -> list[Word]:
@@ -83,6 +83,42 @@ def test_lost_speech_at_the_start_and_end_is_reported():
 def test_no_words_at_all_is_one_stretch():
     assert lost_speech([(3.0, 30.0), (31.0, 50.0)], []) == [(3.0, 50.0)]
 
+
+
+# ---- gaps: long stretches without text --------------------------------------------
+def test_long_stretches_without_text_are_gaps():
+    words = talk(0.0, 20.0) + talk(60.0, 80.0)  # nothing between 19.9 s and 60 s, nor after 79.9 s
+    assert text_gaps(words, 120.0, []) == [(19.9, 60.0, False), (79.9, 120.0, False)]
+
+
+def test_pauses_shorter_than_30_seconds_are_not_gaps():
+    assert text_gaps(talk(0.0, 20.0) + talk(49.5, 60.0), 60.0, []) == []  # 29.6 s
+
+
+def test_silence_before_the_first_word_is_a_gap():
+    assert text_gaps(talk(45.0, 60.0), 60.0, []) == [(0.0, 45.0, False)]
+
+
+def test_lost_speech_inside_a_gap_is_a_gap_of_its_own():
+    words = talk(0.0, 20.0) + talk(200.0, 220.0)
+    assert text_gaps(words, 220.0, [(60.0, 150.0)]) == [
+        (19.9, 60.0, False), (60.0, 150.0, True), (150.0, 200.0, False)]
+
+
+def test_short_silence_beside_lost_speech_is_left_out():
+    words = talk(0.0, 20.0) + talk(130.0, 150.0)
+    assert text_gaps(words, 150.0, [(30.0, 120.0)]) == [(30.0, 120.0, True)]
+
+
+def test_no_words_at_all_is_one_gap_split_by_lost_speech():
+    assert text_gaps([], 100.0, [(3.0, 50.0)]) == [(3.0, 50.0, True), (50.0, 100.0, False)]
+
+
+def test_gaps_follow_the_lost_speech_report():
+    # The same numbers as test_speech_without_words_is_reported: the markers must agree with the warning.
+    speech = [(0.0, 27.0), (27.5, 55.0), (55.4, 83.0), (83.2, 110.0), (110.3, 130.0)]
+    words = talk(0.0, 26.0) + talk(111.0, 130.0)
+    assert text_gaps(words, 130.0, lost_speech(speech, words)) == [(25.9, 111.0, True)]
 
 # ---- what Transcriber.transcribe reports ---------------------------------------------
 class FakeSegment:
