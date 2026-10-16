@@ -137,6 +137,11 @@ def marked_runs(seg: Segment, options: ExportOptions) -> list[tuple[str, bool]]:
     return runs
 
 
+def any_marked(t: Transcript, options: ExportOptions) -> bool:
+    """True when at least one word gets a mark: only then does a legend explain the marks."""
+    return options.mark_uncertain and any(uncertain for seg in t.segments for _, uncertain in marked_runs(seg, options))
+
+
 def marked_text(seg: Segment, options: ExportOptions) -> str:
     """The segment's text with UNCERTAIN_MARK after each uncertain word."""
     return "".join(text + (UNCERTAIN_MARK if uncertain else "") for text, uncertain in marked_runs(seg, options))

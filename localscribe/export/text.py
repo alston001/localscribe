@@ -6,17 +6,17 @@ from pathlib import Path
 
 from ..core.transcript import Gap, Transcript
 from ..i18n import tr_in
-from .common import (UNCERTAIN_MARK, ExportOptions, clock, gap_text, marked_text, metadata, sentences, subtitle_cues,
-                     with_gaps)
+from .common import (UNCERTAIN_MARK, ExportOptions, any_marked, clock, gap_text, marked_text, metadata, sentences,
+                     subtitle_cues, with_gaps)
 
 
-def _legend(options: ExportOptions) -> list[str]:
-    return [tr_in(options.lang, "exp_uncertain_note_mark", mark=UNCERTAIN_MARK)] if options.mark_uncertain else []
+def _legend(t: Transcript, options: ExportOptions) -> list[str]:
+    return [tr_in(options.lang, "exp_uncertain_note_mark", mark=UNCERTAIN_MARK)] if any_marked(t, options) else []
 
 
 def export_txt(t: Transcript, path: Path, options: ExportOptions) -> None:
     meta = " · ".join(f"{k}: {v}" for k, v in metadata(t, options.lang)[:3])
-    lines = [t.source_name, meta, *_legend(options), ""]
+    lines = [t.source_name, meta, *_legend(t, options), ""]
     for item in with_gaps(t):
         if isinstance(item, Gap):
             lines += [gap_text(item, options.lang), ""]
@@ -29,7 +29,7 @@ def export_txt(t: Transcript, path: Path, options: ExportOptions) -> None:
 def export_md(t: Transcript, path: Path, options: ExportOptions) -> None:
     lines = [f"# {t.source_name}", ""]
     lines += [f"- **{k}**: {v}" for k, v in metadata(t, options.lang)]
-    note = sentences(tr_in(options.lang, "exp_generated"), *_legend(options))
+    note = sentences(tr_in(options.lang, "exp_generated"), *_legend(t, options))
     lines += ["", f"*{note}*", "", "---", ""]
     for item in with_gaps(t):
         if isinstance(item, Gap):

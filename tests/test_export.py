@@ -459,3 +459,20 @@ for w in (window, again):
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout.strip().splitlines()[-1]) == [True, True, True]
+
+
+def test_no_legend_when_no_word_is_marked(tmp_path):
+    # A clean recording can have no word below the threshold; then the legend would only puzzle.
+    from docx import Document
+
+    t = unsure_transcript()
+    for seg in t.segments:
+        for w in seg.words:
+            w.prob = HIGH
+    export_txt(t, tmp_path / "a.txt", MARK)
+    export_md(t, tmp_path / "a.md", MARK)
+    export_docx(t, tmp_path / "a.docx", MARK)
+    for name in ("a.txt", "a.md"):
+        assert "(?)" not in (tmp_path / name).read_text(encoding="utf-8"), name
+    texts = [p.text for p in Document(str(tmp_path / "a.docx")).paragraphs]
+    assert "Generated offline by LocalScribe. Please proofread before use." in texts

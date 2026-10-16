@@ -7,7 +7,8 @@ from pathlib import Path
 
 from ..core.transcript import Gap, Transcript
 from ..i18n import tr_in
-from .common import ExportOptions, Row, clock, gap_text, marked_runs, metadata, sentence_rows, sentences, with_gaps
+from .common import (ExportOptions, Row, any_marked, clock, gap_text, marked_runs, metadata, sentence_rows, sentences,
+                     with_gaps)
 
 # Distinct, print-friendly speaker colours (hex RGB).
 _SPEAKER_COLORS = ["1F4E79", "B4501E", "2E6B30", "6B3FA0", "8C6A00", "0E7490", "A1263A", "4B5563"]
@@ -64,7 +65,7 @@ def export_docx(t: Transcript, path: Path, options: ExportOptions) -> None:
         val.font.size = Pt(9)
         val.font.color.rgb = gray
     note = doc.add_paragraph()
-    legend = [tr_in(options.lang, "exp_uncertain_note_highlight")] if options.mark_uncertain else []
+    legend = [tr_in(options.lang, "exp_uncertain_note_highlight")] if any_marked(t, options) else []
     note_run = note.add_run(sentences(tr_in(options.lang, "exp_generated"), *legend))
     note_run.italic = True
     note_run.font.size = Pt(9)
