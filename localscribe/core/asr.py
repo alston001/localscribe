@@ -225,22 +225,20 @@ class Transcriber:
 
             # The pipeline's own defaults, spelled out so `speech` holds the regions it decodes.
             vad = VadOptions(max_speech_duration_s=30, min_silence_duration_ms=160)
-            segments, info = BatchedInferencePipeline(self.model).transcribe(
+            found, info = BatchedInferencePipeline(self.model).transcribe(
                 audio, batch_size=batch_size, vad_filter=True, vad_parameters=vad, **options)
+            segments = ((seg, min(seg.end / duration, 1.0)) for seg in found)
             speech = [(r["start"] / SAMPLE_RATE, r["end"] / SAMPLE_RATE)
                       for r in get_speech_timestamps(audio, vad)]
         else:
             clips = speech_clips(audio)
             if not clips:
                 return AsrResult(language or "", 0.0, [])  # "" = unknown, nothing was heard
-            # Without conditioning, one misheard phrase cannot snowball into a repetition loop.
-            segments, info = self.model.transcribe(
-                audio, vad_filter=False, clip_timestamps=[t for clip in clips for t in clip],
-                condition_on_previous_text=False, **options)
+            segments, info = self._decode_clips(audio, clips, options)
             speech = list(clips)
 
         words: list[Word] = []
-        for seg in segments:  # generator: decoding happens while iterating
+        for seg, done in segments:  # generator: decoding happens while iterating
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             if seg.words:
@@ -249,6 +247,41 @@ class Transcriber:
             elif seg.text.strip():
                 words.append(Word(float(seg.start), float(seg.end), " " + seg.text.strip(), 0.5))
             if progress is not None and duration > 0:
-                progress(min(seg.end / duration, 1.0))
+                progress(done)
         words.sort(key=lambda w: w.start)
         return AsrResult(info.language, float(info.language_probability), words, speech)
+
+    def _decode_clips(self, audio: np.ndarray, clips: list[tuple[float, float]], options: dict):
+        """(segments, each with the share of the speech decoded so far, info). Every clip is decoded
+        on its own and without conditioning, so one misheard phrase cannot snowball into a
+        repetition loop.
+
+        A clip that starts where the previous one ended was cut out of running speech and begins
+        mid-sentence. With hotwords (a word bank), Whisper dropped the first words of 8 of 162 such
+        synthetic clips, against none without, so those clips are decoded without them.
+        """
+        cut = {i for i in range(1, len(clips)) if clips[i][0] - clips[i - 1][1] < 0.1}
+        groups = [[c for i, c in enumerate(clips) if i not in cut], [c for i, c in enumerate(clips) if i in cut]]
+        if not options["hotwords"] or not groups[1]:
+            groups = [clips, []]
+        total = sum(end - start for start, end in clips)
+
+        def decode(group: list[tuple[float, float]], opts: dict):
+            return self.model.transcribe(audio, vad_filter=False, clip_timestamps=[t for c in group for t in c],
+                                         condition_on_previous_text=False, **opts)
+
+        first, info = decode(groups[0], options)
+
+        def segments():
+            done = 0.0
+            for group, found in ((groups[0], first), (groups[1], None)):
+                if not group:
+                    continue
+                if found is None:  # with the language already detected, so both decodes agree
+                    found, _ = decode(group, {**options, "hotwords": None, "language": info.language})
+                for seg in found:
+                    covered = sum(max(0.0, min(end, seg.end) - start) for start, end in group)
+                    yield seg, min((done + covered) / total, 1.0)
+                done += sum(end - start for start, end in group)
+
+        return segments(), info

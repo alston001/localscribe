@@ -208,6 +208,34 @@ def test_transcribe_reports_where_it_heard_speech(monkeypatch):
     assert result.speech == clips
 
 
+def test_clips_cut_out_of_running_speech_go_without_the_word_bank(monkeypatch):
+    # A clip that starts where the previous one ended begins mid-sentence. With a word bank,
+    # Whisper dropped the first words of 8 of 162 such test clips; without one, of none.
+    clips = [(1.0, 28.0), (28.0, 55.0), (56.5, 80.0), (80.0, 99.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    result = transcriber.transcribe(np.zeros(16000 * 100, np.float32), language="en", hotwords="Quuxian, Vexley")
+    calls = [options for _, options in transcriber.model.calls]
+    assert [(c["clip_timestamps"], c["hotwords"]) for c in calls] == [
+        ([1.0, 28.0, 56.5, 80.0], "Quuxian, Vexley"), ([28.0, 55.0, 80.0, 99.0], None)]
+    assert len(result.words) == 4 and result.speech == clips  # both decodes' words, all the speech
+
+
+def test_without_a_word_bank_all_clips_go_in_one_decode(monkeypatch):
+    clips = [(1.0, 28.0), (28.0, 55.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    transcriber.transcribe(np.zeros(16000 * 60, np.float32), language="en")
+    assert [options["clip_timestamps"] for _, options in transcriber.model.calls] == [[1.0, 28.0, 28.0, 55.0]]
+
+
+def test_the_second_decode_keeps_the_detected_language_and_progress_only_grows(monkeypatch):
+    clips = [(1.0, 28.0), (28.0, 55.0)]
+    transcriber = fake_transcriber(monkeypatch, clips)
+    seen = []
+    transcriber.transcribe(np.zeros(16000 * 60, np.float32), language=None, hotwords="Quuxian", progress=seen.append)
+    assert [options["language"] for _, options in transcriber.model.calls] == [None, "en"]
+    assert seen == sorted(seen) and seen[-1] <= 1.0
+
+
 def test_fast_mode_reports_the_regions_it_decoded(monkeypatch):
     used = {}
 
