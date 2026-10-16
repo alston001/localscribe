@@ -8,6 +8,12 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 
 - **Word banks for technical terms.** Whisper often mishears jargon, for example writing "tokenization" as "organization". Keep a short list of terms for each course or topic, and pick it in the main window's new **Word bank** menu before you start; the menu is searchable and can create, edit and delete banks. The bank's terms come first, then those in **Settings › Names and terms**. Whisper reads only the first 223 tokens of these terms, about 55 English terms. The editor counts them as you type, and before a run LocalScribe lists any terms that would be left out, instead of letting Whisper drop them silently. Terms in a bank make Whisper more likely to hear them, so keep each bank to the course at hand. Banks are saved in `%LOCALAPPDATA%\LocalScribe\vocabularies.json`, `_transcript.json` records which bank was used, and the command line takes `--vocabulary NAME`.
 
+### Proofreading aids
+
+- **Mark unsure words** (off by default; in the main window, or `--mark-uncertain` on the command line). Words Whisper gave less than 40% confidence are highlighted in yellow in Word, followed by `(?)` in text and Markdown, and listed in an extra *Unsure words* column in Excel and CSV, so the text column stays as spoken. Subtitles stay unmarked. The 40% comes from synthetic test recordings with a known script: in the clean and reverberant ones it marked about 1 word in 100, and more than half of the marked words were real recognition errors; at 50%, four in five of the extra marks were correct words. Most errors are not marked, because Whisper is often confident when it mishears ("organization" for "tokenization"), so this complements word banks and proofreading.
+- **Stretches without text are marked.** Where no text came out for 30 seconds or more, text, Markdown and Word transcripts get a line such as `[Nothing transcribed 00:40:30–00:42:05]`, in the language of the headings. Where the voice detector heard 30 seconds of speech or more, the line says `[Speech detected, nothing transcribed …]` instead; these are the stretches the lost-speech warning lists. The plain line doesn't promise silence, since up to 30 seconds of speech can hide in it. Subtitles and spreadsheets show silences through their times, so they get no markers. `_transcript.json` keeps the stretches in a new `gaps` list; files from earlier versions still load, without markers.
+- **A long silence starts a new paragraph.** After more than 10 seconds of silence a new paragraph begins, even when Whisper left out the period before it, so the timestamps show the jump. Before, with one speaker, such a silence could stay hidden inside a paragraph.
+
 ### Problems are reported instead of hidden
 
 - **Warnings on finished files.** When a file finishes but the result may be worse than usual, LocalScribe now says so. The queue shows "Done (1 warning(s))" (hover for details), and the warning also goes to the log, the command-line output and `_transcript.json`. Cases covered:
@@ -54,13 +60,16 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 
 - `packaging\make_zip.py [dist folder]` takes the build folder (for example `dist_build`) and checks that `LocalScribe.exe` is in it.
 - `.gitignore` covers recordings and transcripts in every folder, not just the project root, plus partial downloads, logs and `.env`.
-- The test suite grew from 20 to 235 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
+- The test suite grew from 20 to 282 tests. They use fake models, so no GPU or model download is needed, and they take about 5 seconds.
 
 ### 中文摘要
 
 以下是 0.1.1 之後的變更，來自程式碼審查與實機測試，尚未發佈。
 
 - **詞庫**：主視窗新增「詞庫」選單，可以為每門課或每個主題建一份專有名詞清單，開始前選好，Whisper 比較不會聽錯，例如把 tokenization 寫成 organization。Whisper 最多只讀約 55 個英文詞，超過時開始前會列出不會被使用的詞。詞庫存在 `%LOCALAPPDATA%\LocalScribe\vocabularies.json`。
+- **標記不確定的字詞**（預設關閉，命令列用 `--mark-uncertain`）：Whisper 把握低於 40% 的字，Word 以黃色標示，txt 和 md 在字後加 (?)，Excel 和 CSV 多一欄列出；字幕不標記。在乾淨和有回音的合成測試錄音中，約每 100 個字標出 1 個，其中一半以上真的聽錯。很有把握卻聽錯的字（例如把 tokenization 聽成 organization）不會被標出，所以要和詞庫、校對一起用。
+- **空白段標註**：30 秒以上沒有轉出文字的地方，txt、md 和 Word 會寫上「[沒有轉出文字 00:40:30–00:42:05]」；偵測到 30 秒以上的說話聲卻沒有文字時，寫「[偵測到語音，但沒有轉出文字 …]」，請回去聽是否漏掉內容。字幕和試算表從時間就看得出空白，不加標記。舊版的 `_transcript.json` 仍可讀取。
+- **長時間停頓會換段**：停頓超過 10 秒就開新段落，即使 Whisper 沒有加句號，時間戳記也看得出空白。
 - **問題會提醒你，不再默默發生**：檔案完成但結果可能較差時，工作清單會顯示「完成（N 項提醒）」，滑鼠停上去可看細節，記錄檔、命令列輸出和 `_transcript.json` 也會記下。涵蓋：檔案損毀或被截斷、顯示卡失敗改用 CPU、設定指定顯示卡卻找不到、分不出說話人或人數少於指定、偵測到 30 秒以上的說話聲卻沒有轉出文字（會列出時間段）。
 - **截斷的錄音會被發現**：中途中斷或沒複製完整的檔案，以前會被當成完整的來轉錄；現在會比對實際讀到的長度。轉檔工具也會檢查並標示。
 - **沒有語音時直接報錯**，不再產生空白逐字稿。
@@ -68,7 +77,7 @@ Changes since 0.1.1, from a code review and a round of hands-on testing.
 - **逐字稿**：Whisper 憑空寫出、單獨成句、而且把握不到 50% 的「Thank you.」類結尾語會被刪除。換人點只差句首或句尾 1–2 個字時，整句歸給同一個人，換人點會落在句尾或停頓處。`_transcript.json` 可供日後的校對編輯器使用：較新版本的檔案會明確拒絕而不是遺失資料，存檔失敗不會毀掉舊檔。文字修改過後，字幕和試算表以修改後的文字為準。快速模式的英文標點提示只在語言設為英文時使用。
 - **穩定性**：工作執行中關閉視窗會先等它停止，太久會提示並保持開啟，不再當掉。轉檔時按 Esc 等於「取消」，視窗保留並顯示「已停止」。背景錯誤會記錄並跳出提示。輸出檔全部寫完才放到目的地，失敗不留半成品。模型下載遇到伺服器忙碌會重試。損毀的 `settings.json` 會備份成 `settings.json.bad`。`--speakers` 會拒絕 `2-`、`3-1`、`0` 這類值。`.ts` 不再被當成媒體檔。關閉提示改為「正在轉錄中」。
 - **隱私與安全**：`_transcript.json` 和 Excel 只記錄檔名，不記錄資料夾；記錄檔也只寫檔名。下載的模型會核對 SHA-256，token 只透過 https 傳送。ffmpeg 只讀本機檔案，檔案標籤無法偽造長度。CSV 與 Excel 中以 `=`、`+`、`-`、`@` 開頭的內容會加上 `'`，不會被當成公式執行。
-- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 235 個。
+- **開發者**：`make_zip.py` 可指定建置資料夾；`.gitignore` 涵蓋所有資料夾中的錄音與逐字稿；測試從 20 個增加到 282 個。
 
 ## 0.1.1
 

@@ -153,18 +153,22 @@ def smooth_speakers(words: list[Word], labels: list[str], coverage: np.ndarray,
 
 
 def group_utterances(words: list[Word], labels: list[str], max_gap: float = 3.0,
-                     max_duration: float = 60.0) -> list[list[int]]:
+                     max_duration: float = 60.0, max_pause: float = 10.0) -> list[list[int]]:
     """Word-index groups: one per speaker turn. A long monologue is broken into
-    paragraphs at sentence ends after long pauses or every ~minute."""
+    paragraphs at sentence ends after long pauses or every ~minute, and anywhere after a
+    silence over `max_pause` seconds: Whisper often leaves out the period before one, and
+    inside a paragraph the silence would not show in the timestamps (nor leave room for a
+    gap marker). 10 s is the pause that also ends a stretch of speech in asr.lost_speech."""
     groups: list[list[int]] = []
     current: list[int] = []
     for k, word in enumerate(words):
         if current:
             prev = words[current[-1]]
-            if labels[k] != labels[current[0]]:
+            pause = word.start - prev.end
+            if labels[k] != labels[current[0]] or pause > max_pause:
                 groups.append(current)
                 current = []
-            elif ends_sentence(prev.text) and (word.start - prev.end > max_gap or
+            elif ends_sentence(prev.text) and (pause > max_gap or
                                                word.start - words[current[0]].start > max_duration):
                 groups.append(current)
                 current = []
