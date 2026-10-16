@@ -156,6 +156,22 @@ def test_group_utterances_by_speaker_and_long_monologue():
     assert len(groups) >= 4  # A's 70 s split into ~30 s paragraphs, then B
 
 
+
+def test_a_long_pause_mid_sentence_starts_a_new_paragraph():
+    # One speaker, no period before a 40 s silence: as one paragraph, its timestamp hid the gap.
+    ws = words([(0, 1, " So"), (1, 2, " the"), (2, 3, " answer"), (43, 44, " is"), (44, 45, " this.")])
+    assert group_utterances(ws, ["A"] * 5) == [[0, 1, 2], [3, 4]]
+
+
+def test_a_pause_shorter_than_a_gap_marker_also_shows_in_the_timestamps():
+    ws = words([(0, 1, " So"), (1, 2, " the"), (2, 3, " answer"), (18, 19, " is"), (19, 20, " this.")])
+    assert group_utterances(ws, ["A"] * 5) == [[0, 1, 2], [3, 4]]  # 15 s
+
+
+def test_a_short_pause_mid_sentence_keeps_the_paragraph():
+    ws = words([(0, 1, " So"), (1, 2, " the"), (2, 3, " answer"), (8, 9, " is"), (9, 10, " this.")])
+    assert group_utterances(ws, ["A"] * 5) == [[0, 1, 2, 3, 4]]  # 5 s: thinking it over
+
 def test_join_and_sentence_end_helpers():
     assert join_words(words([(0, 1, " Hello,"), (1, 2, "  world.")])) == "Hello, world."
     assert ends_sentence(' he said "stop."') and not ends_sentence(" and")
