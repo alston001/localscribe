@@ -55,6 +55,23 @@ def test_sign_offs_about_listening_are_dropped_too():
     assert text(drop_sign_offs(words)) == " on."
 
 
+def test_longer_sign_offs_are_dropped_to_the_end_of_their_sentence():
+    # From a second set of test clips, with and without a word bank.
+    words = say((" Thank", 0.18), (" you", 0.99), (" so", 0.32), (" much", 1.0), (" for", 0.37), (" watching,", 0.74),
+                (" and", 0.67), (" we'll", 0.6), (" see", 0.94), (" you", 1.0), (" on", 0.57), (" the", 0.86),
+                (" next", 0.71), (" one.", 0.35))
+    assert drop_sign_offs(words) == []
+    words = say(*[(" Thank", 0.13), (" you", 0.99), (" for", 0.3), (" listening", 0.44)]
+                + [(f" {w}", 0.5) for w in "to my lecture on how to skip the next part of the budget.".split()])
+    assert drop_sign_offs(words) == []
+
+
+def test_sure_thanks_that_run_on_are_kept():
+    words = say((" Thank", 0.9), (" you", 1.0), (" for", 0.9), (" listening,", 0.9), (" and", 0.9), (" the", 0.9),
+                (" essay", 0.9), (" is", 0.9), (" due", 0.9), (" Friday.", 0.9))
+    assert drop_sign_offs(words) == words
+
+
 def test_thanks_that_go_on_are_kept():
     # Not a sign-off, even when Whisper is unsure of the first word.
     words = say((" Thank", 0.3), (" you", 0.9), (" for", 0.9), (" the", 0.9), (" question.", 0.9))

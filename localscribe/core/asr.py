@@ -97,12 +97,14 @@ def _without_words(words: list[Word], end: float) -> list[tuple[float, float]]:
     return stretches
 
 
-# Closing lines Whisper writes on its own, longest first (see drop_sign_offs). The ones for
-# watching or listening may run on to the end of their sentence.
-_SIGN_OFFS = [("thank", "you", "for", "watching"), ("thank", "you", "for", "listening"),
-              ("thank", "you", "very", "much"), ("thank", "you", "so", "much"),
-              ("thanks", "for", "watching"), ("thanks", "for", "listening"), ("thank", "you"), ("thanks",)]
+# Closing lines Whisper writes on its own ("Thank you so much for watching"), longest first (see
+# drop_sign_offs). The ones for watching or listening may run on to the end of their sentence.
+_SIGN_OFFS = sorted({opening + middle + ending
+                     for opening in (("thank", "you"), ("thanks",))
+                     for middle in (("so", "much"), ("very", "much"), ())
+                     for ending in (("for", "watching"), ("for", "listening"), ())}, key=len, reverse=True)
 _RUN_ON = {"watching", "listening"}
+_RUN_ON_WORDS = 25
 # Credits and appeals from subtitled videos, which nobody says in a recording.
 _CREDITS = re.compile(
     r"\b(?:sub)?titles?\s+(?:by|from)\s+(?:the\s+)?amara\.org(?:\s+community)?|\bamara\.org(?:\s+community)?"
@@ -151,7 +153,7 @@ def _sign_off_length(words: list[Word], i: int) -> int:
             continue
         end = i + len(phrase)  # one past the sign-off's last word
         if phrase[-1] in _RUN_ON:
-            while not ends_sentence(end - 1) and end < len(words) and end - i < 12:
+            while not ends_sentence(end - 1) and end < len(words) and end - i < _RUN_ON_WORDS:
                 end += 1
         if ends_sentence(end - 1):
             return end - i
