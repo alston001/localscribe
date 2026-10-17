@@ -1,4 +1,4 @@
-"""Settings dialog: interface language, transcription model, diarization engine, model folder."""
+"""Settings dialog: interface language, updates, transcription model, diarization engine, model folder."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QVBoxLayout, QWidget)
 
-from .. import APP_NAME, i18n
+from .. import APP_NAME, __version__, i18n
 from ..config import WHISPER_CHOICES, Settings
 from ..core.models import PYANNOTE_PAGE, ModelStore
 from ..i18n import tr
-from .threads import PyannoteDownload
+from .threads import PyannoteDownload, UpdateCheck
 
 _TOKEN_PAGE = "https://huggingface.co/settings/tokens"
 
@@ -30,11 +30,15 @@ def _fill(combo: QComboBox, items: list[tuple[str, str]], current: str) -> None:
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: Settings, extra_model_dirs: list[Path], parent=None):
+    def __init__(self, settings: Settings, extra_model_dirs: list[Path], parent=None, on_update_checked=None):
+        """on_update_checked(release, error): also told what "Check now" found, e.g. the main window
+        to offer the update; it hears even when the answer comes after Settings has closed."""
         super().__init__(parent)
         self.settings = copy.deepcopy(settings)
         self.extra_model_dirs = extra_model_dirs
         self.download: PyannoteDownload | None = None
+        self.check: UpdateCheck | None = None
+        self.on_update_checked = on_update_checked
         self.setWindowTitle(tr("settings"))
         self.setMinimumWidth(560)
 
@@ -53,6 +57,17 @@ class SettingsDialog(QDialog):
         self.chk_sub_speakers = QCheckBox(tr("subtitle_speakers"))
         self.chk_sub_speakers.setChecked(self.settings.subtitle_speakers)
         form.addRow("", self.chk_sub_speakers)
+        updates_row = QHBoxLayout()
+        self.chk_updates = QCheckBox(tr("upd_auto"))
+        self.chk_updates.setChecked(self.settings.update_check)
+        self.chk_updates.setToolTip(tr("upd_auto_tip"))
+        self.btn_check = QPushButton(tr("upd_check_now"))
+        self.btn_check.clicked.connect(self._check_for_update)
+        updates_row.addWidget(self.chk_updates, 1)
+        updates_row.addWidget(self.btn_check)
+        form.addRow(tr("updates"), updates_row)
+        self.lbl_update = QLabel(tr("upd_version", version=__version__), objectName="hint", wordWrap=True)
+        form.addRow("", self.lbl_update)
         layout.addWidget(general)
 
         asr = QGroupBox(tr("transcription"))
@@ -156,6 +171,27 @@ class SettingsDialog(QDialog):
         if ok:
             self._refresh_pyannote_status()
 
+    def _check_for_update(self) -> None:
+        if self.check is not None:
+            return
+        self.btn_check.setEnabled(False)
+        self.lbl_update.setText(tr("upd_checking"))
+        # A daemon thread (threads.UpdateCheck): closing Settings never waits for it.
+        self.check = UpdateCheck(fetch=True, parent=self.parent() or self)
+        self.check.done.connect(self._on_update_checked)
+        if self.on_update_checked is not None:
+            self.check.done.connect(self.on_update_checked)
+        self.check.start()
+
+    def _on_update_checked(self, release, error: str) -> None:
+        self.check = None
+        self.btn_check.setEnabled(True)
+        if error:
+            self.lbl_update.setText(error)
+            return
+        self.lbl_update.setText(tr("upd_found", version=release.version) if release
+                                else tr("upd_latest", version=__version__))
+
     def _choose_models_dir(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, tr("models_folder"), self.txt_models.text())
         if folder:
@@ -180,6 +216,7 @@ class SettingsDialog(QDialog):
             return  # wait for the download to finish
         s = self.settings
         s.ui_language = self.cmb_ui.currentData()
+        s.update_check = self.chk_updates.isChecked()
         s.speaker_label = self.txt_label.text().strip() or "Speaker"
         s.subtitle_speakers = self.chk_sub_speakers.isChecked()
         s.whisper_model = self.cmb_model.currentData()

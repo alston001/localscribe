@@ -6,18 +6,21 @@ import dataclasses
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QUrl
+from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMenu,
                                QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QScrollArea,
                                QSpinBox, QSplitter, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, i18n, paths
+from .. import APP_NAME, __version__, i18n, paths
 from ..config import LANGUAGE_CHOICES, PRESET_ORDER, PRESETS, Settings
 from ..core import device as dev
+from ..core import update
+from ..core.errors import UserError
 from ..core.media import MEDIA_EXTENSIONS, probe
 from ..core.pipeline import Engine
 from ..export import FORMATS
@@ -28,7 +31,8 @@ from . import style
 from .convert_dialog import ConvertDialog
 from .jobs import JobTableModel, QueueView
 from .settings_dialog import SettingsDialog, _fill
-from .threads import DeviceProbe, DurationProbe, ProcessThread, Task
+from .threads import DeviceProbe, DurationProbe, ProcessThread, Task, UpdateCheck
+from .update_bar import UpdateBar
 from .vocabulary_picker import VocabularyEditor, VocabularyPicker
 
 log = logging.getLogger("localscribe")
@@ -45,6 +49,8 @@ class MainWindow(QMainWindow):
         self.run_results = {"ok": 0, "bad": 0}
         self._helpers: list = []  # keeps short-lived probe threads alive
         self._closing = False  # Quit was confirmed; the worker is stopping
+        self._pending_installer: Path | None = None  # started once the window has closed
+        self._update_check = None  # the check at start (threads.UpdateCheck)
         self.vocabularies: list[Vocabulary] = []
         self._reload_vocabularies()
         self.model = JobTableModel(self)
@@ -56,6 +62,7 @@ class MainWindow(QMainWindow):
         probe.ready.connect(self._on_device_ready)
         self._keep(probe)
         probe.start()
+        QTimer.singleShot(2000, self._startup_update_check)  # once the window is up
 
     # ------------------------------------------------------------------ layout
     def _build(self) -> None:
@@ -71,6 +78,10 @@ class MainWindow(QMainWindow):
 
         left = QVBoxLayout()
         left.setSpacing(8)
+        # Above the file list: a strip across the whole window would leave the options panel short.
+        self.update_bar = UpdateBar()
+        self.update_bar.restart_requested.connect(self._restart_to_update)
+        left.addWidget(self.update_bar)
         bar = QHBoxLayout()
         self.btn_add = QPushButton(clicked=self.add_files_dialog)
         self.btn_remove = QPushButton(clicked=self.remove_selected)
@@ -284,6 +295,7 @@ class MainWindow(QMainWindow):
         self.rad_same.setText(tr("save_same"))
         self.rad_custom.setText(tr("save_custom"))
         self.btn_choose_dir.setText(tr("choose"))
+        self.update_bar.retranslate()
         self.model.retranslate()
         self.view.viewport().update()
         self._update_speaker_widgets()
@@ -440,17 +452,64 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         bundled = [d for d in [paths.bundled_models_dir()] if d]
-        dialog = SettingsDialog(self.settings, bundled, self)
+        dialog = SettingsDialog(self.settings, bundled, self, on_update_checked=self._on_manual_update_check)
         if dialog.exec() != SettingsDialog.Accepted:
             return
-        language_changed = dialog.settings.ui_language != self.settings.ui_language
-        self.settings = dialog.settings
+        chosen = dialog.settings
+        # Written by update checks while Settings was open, after the dialog took its copy.
+        chosen.update_checked_at, chosen.last_version = self.settings.update_checked_at, self.settings.last_version
+        language_changed = chosen.ui_language != self.settings.ui_language
+        self.settings = chosen
         self._save_settings()
         self.engine.update_settings(self.settings.engine_settings())
         if language_changed:
             i18n.set_language(self.settings.ui_language)
             self.retranslate()
         self._update_status_bar()
+
+    # --------------------------------------------------------------- updates
+    def _startup_update_check(self) -> None:
+        s = self.settings
+        try:
+            update.clean_up()
+        except OSError:
+            log.warning("Could not remove old update downloads", exc_info=True)
+        if s.last_version != __version__:
+            if s.last_version:
+                log.info("Updated from %s to %s", s.last_version, __version__)
+                self.statusBar().showMessage(tr("upd_done", version=__version__), 15000)
+            s.last_version = __version__
+            self._save_settings()
+        if not s.update_check or update.install_mode() == "source":  # a checkout updates through git
+            return
+        fetch = update.due(s.update_checked_at, time.time())
+        check = UpdateCheck(fetch, self)
+        check.done.connect(lambda release, error: self._on_update_checked(release, error, fetch))
+        self._update_check = check  # a daemon thread: quitting never waits for it
+        check.start()
+
+    def _on_manual_update_check(self, release, error: str) -> None:
+        """"Check now" in Settings; also when Settings closed before the answer came."""
+        self._on_update_checked(release, error, True)
+
+    def _on_update_checked(self, release, error: str, fetched: bool) -> None:
+        if error:  # offline, or GitHub unreachable: try again at the next start
+            log.info("Update check failed: %s", error)
+            return
+        if fetched:
+            self.settings.update_checked_at = int(time.time())
+            self._save_settings()
+        if release is not None:
+            log.info("LocalScribe %s is available (%s installer, %s)", release.version, release.kind,
+                     update.size_text(release.size))
+            self.update_bar.offer(release, update.install_mode())
+
+    def _restart_to_update(self, installer: Path) -> None:
+        """Quits, so the installer can replace LocalScribe's files; it starts LocalScribe again."""
+        if self.worker is not None:  # the button waits for the transcription; just in case
+            return
+        self._pending_installer = installer
+        self.close()
 
     # ---------------------------------------------------------------- status
     def _on_device_ready(self, info) -> None:
@@ -627,6 +686,7 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         for w in (self.grp_options, self.grp_formats, self.grp_save, self.btn_settings):
             w.setEnabled(not running)
+        self.update_bar.set_busy(running)
         self._update_run_button()
 
     def _update_run_button(self) -> None:
@@ -748,6 +808,7 @@ class MainWindow(QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
+        installer, self._pending_installer = self._pending_installer, None  # for this close only
         if self.worker is not None and not self._closing:
             answer = QMessageBox.question(self, APP_NAME, tr("confirm_quit"))
             if answer != QMessageBox.Yes:
@@ -755,12 +816,21 @@ class MainWindow(QMainWindow):
                 return
             self._closing = True
             self.worker.cancel.set()
-        # Destroying a QThread that is still running crashes the app: wait, or stay open.
+        # Destroying a QThread that is still running crashes the app: wait, or stay open. An update
+        # download is stopped last (it resumes next time), only once nothing else holds the close up.
         threads = ([self.worker] if self.worker is not None else []) + list(self._helpers)
-        if not all(thread.wait(15000) for thread in threads):  # e.g. the probe still importing torch
+        if not all(thread.wait(15000) for thread in threads) or not self.update_bar.stop():  # e.g. the probe importing torch
             QMessageBox.information(self, APP_NAME, tr("still_stopping"))
             event.ignore()
             return
         self.settings.geometry = bytes(self.saveGeometry().toHex()).decode()
         self._save_settings()
+        if installer is not None:
+            try:
+                update.start_installer(installer)
+            except UserError as exc:
+                QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
+                event.ignore()
+                return
+            log.info("Quitting so the installer can update LocalScribe")
         event.accept()

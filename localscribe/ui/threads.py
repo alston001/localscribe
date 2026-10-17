@@ -1,4 +1,4 @@
-"""Background threads: hardware probe, duration probe, conversions, pyannote download."""
+"""Background threads: hardware probe, duration probe, conversions, model and update downloads."""
 
 from __future__ import annotations
 
@@ -10,9 +10,10 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..core import device as dev
+from ..core import update
 from ..core.errors import Cancelled, UserError
 from ..core.media import probe_duration
 from ..core.models import ModelStore
@@ -185,3 +186,55 @@ class PyannoteDownload(QThread):
         except Exception as exc:
             log.exception("pyannote download failed")
             self.done.emit(False, tr("err_unexpected", detail=f"{type(exc).__name__}: {exc}"))
+
+
+class UpdateCheck(QObject):
+    """Asks GitHub for a newer release, or with fetch=False reads what the last check found. It
+    runs in a daemon thread, not a QThread: a network that hangs where no timeout reaches (name
+    lookups) must never keep LocalScribe or Settings from closing, and a running QThread can't be
+    left behind. `done` still arrives on the GUI thread, since this object lives there."""
+
+    done = Signal(object, str)  # update.Release or None, why the check failed ("" when it worked)
+
+    def __init__(self, fetch: bool, parent=None):
+        super().__init__(parent)
+        self.fetch = fetch
+
+    def start(self) -> None:
+        threading.Thread(target=self._run, name="update-check", daemon=True).start()
+
+    def _run(self) -> None:
+        try:
+            result = (update.check(fetch=self.fetch), "")
+        except UserError as exc:
+            result = (None, tr(exc.key, **exc.kwargs))
+        except Exception as exc:
+            log.warning("Update check failed", exc_info=True)
+            result = (None, tr("err_unexpected", detail=f"{type(exc).__name__}: {exc}"))
+        try:
+            self.done.emit(*result)
+        except RuntimeError:  # the window it reported to has closed meanwhile
+            pass
+
+
+class UpdateDownload(QThread):
+    progress = Signal(object, object)  # done bytes, total bytes
+    done = Signal(object, str)  # the installer to run or None, why it failed ("" when stopped)
+
+    def __init__(self, release, parent=None):
+        super().__init__(parent)
+        self.release = release
+        self.cancel = threading.Event()
+
+    def run(self) -> None:
+        try:
+            installer = update.download(self.release, progress=self.progress.emit, cancel=self.cancel)
+            log.info("Downloaded LocalScribe %s (%s)", self.release.version, update.size_text(self.release.size))
+            self.done.emit(installer, "")
+        except Cancelled:
+            self.done.emit(None, "")
+        except UserError as exc:
+            self.done.emit(None, tr(exc.key, **exc.kwargs))
+        except Exception as exc:
+            log.exception("Update download failed")
+            self.done.emit(None, tr("err_unexpected", detail=f"{type(exc).__name__}: {exc}"))
