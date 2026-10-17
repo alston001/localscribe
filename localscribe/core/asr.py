@@ -113,8 +113,9 @@ _ONE_CJK = re.compile(rf"[{_CJK}]")
 def repeats(words: list[Word], times: int = _REPEAT_TIMES) -> list[tuple[float, float]]:
     """Stretches in which the same words come out `times` times or more in a row, as (start, end):
     a sentence that comes back again and again, or a phrase looping inside one. Whisper can get
-    stuck like this, while people seldom say a thing four times running: on an English lecture,
-    three times in a row came out only for short phrases at a speaking pace. What repeats must
+    stuck like this, while people seldom say a thing four times running: on five English
+    lectures, three times in a row came out for three short phrases at a speaking pace, four times
+    for none. What repeats must
     hold at least 4 Chinese characters or 3 other words, so 對對對, 好的好的好的 or "no, no, no"
     don't count, unless it goes on and on (嗯 or "Thank you." for a whole clip). Punctuation and
     case are ignored."""
