@@ -619,7 +619,8 @@ class MainWindow(QMainWindow):
         if terms is None:
             return
         hotwords, vocabulary = terms
-        self.run_template = Task(0, Path(), s.job_options(hotwords=hotwords), list(s.formats),
+        keep = prompt_terms(find_vocabulary(self.vocabularies, vocabulary), s.hotwords)  # spelled as written
+        self.run_template = Task(0, Path(), s.job_options(hotwords=hotwords, keep_terms=keep), list(s.formats),
                                  s.export_options(i18n.current_language()),
                                  Path(s.save_dir) if s.save_mode == "custom" else None, vocabulary)
         worker = ProcessThread(self.engine, self)

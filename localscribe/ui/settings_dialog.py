@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from .. import APP_NAME, __version__, i18n
 from ..config import WHISPER_CHOICES, Settings
+from ..core import chinese
 from ..core.models import PYANNOTE_PAGE, ModelStore
 from ..i18n import tr
 from .threads import PyannoteDownload, UpdateCheck
@@ -82,6 +83,10 @@ class SettingsDialog(QDialog):
         self.txt_hotwords.setPlaceholderText(tr("hotwords_placeholder"))
         self.txt_hotwords.setToolTip(tr("hotwords_tip"))
         form.addRow(tr("hotwords"), self.txt_hotwords)
+        self.cmb_chinese = QComboBox()
+        _fill(self.cmb_chinese, [(style, tr(f"zh_{style}")) for style in chinese.STYLES], self.settings.chinese_script)
+        self.cmb_chinese.setToolTip(tr("zh_script_tip"))
+        form.addRow(tr("zh_script"), self.cmb_chinese)
         layout.addWidget(asr)
 
         diar = QGroupBox(tr("diarization"))
@@ -222,6 +227,7 @@ class SettingsDialog(QDialog):
         s.whisper_model = self.cmb_model.currentData()
         s.device = self.cmb_device.currentData()
         s.hotwords = self.txt_hotwords.text().strip()
+        s.chinese_script = self.cmb_chinese.currentData()
         s.diarizer = self.cmb_engine.currentData()
         from .. import paths
 
