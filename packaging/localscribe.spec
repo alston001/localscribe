@@ -25,9 +25,11 @@ for pkg in ("pyannote.audio", "pyannote.pipeline", "pyannote.core", "pyannote.da
     hiddenimports += collect_submodules(pkg)
 for pkg in ("ctranslate2", "sherpa_onnx", "onnxruntime", "torchcodec"):
     binaries += collect_dynamic_libs(pkg)
-# OpenCC: its dictionaries (not its command-line tools and C headers), and the msvcp140 copy its wheel carries.
+# OpenCC: its dictionaries, and the msvcp140 copy its wheel carries. The contributed hook takes the whole
+# package, so its command-line tools, C headers and static libraries (8 MB) are left out after Analysis.
 datas += collect_data_files("opencc", includes=["clib/share/opencc/*"])
 datas, binaries = collect_delvewheel_libs_directory("opencc", datas=datas, binaries=binaries)
+_OPENCC_BUILD_ONLY = ("opencc/clib/bin/", "opencc/clib/include/", "opencc/clib/lib/")
 # importlib.metadata lookups (pyannote's dependency check, opentelemetry entry points, lightning)
 for dist in ("pyannote.audio", "faster-whisper", "ctranslate2", "sherpa-onnx", "torch", "torchaudio"):
     datas += copy_metadata(dist, recursive=True)
@@ -50,6 +52,8 @@ a = Analysis(
               "PySide6.QtWebEngineCore", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.Qt3DCore"],
     noarchive=False,
 )
+a.datas, a.binaries = ([entry for entry in toc if not entry[0].replace("\\", "/").startswith(_OPENCC_BUILD_ONLY)]
+                       for toc in (a.datas, a.binaries))  # its .exe tools count as binaries
 # sounddevice's hook brings every PortAudio build it ships: 32-bit, ARM, macOS and ASIO ones too. It
 # loads libportaudio64bit.dll unless SD_ENABLE_ASIO is set, and the ASIO SDK has a license of its own.
 a.binaries = [entry for entry in a.binaries if "portaudio-binaries" not in entry[0].replace("\\", "/")
