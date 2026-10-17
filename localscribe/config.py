@@ -62,6 +62,9 @@ class Settings:
     convert_save_mode: str = "same"
     convert_save_dir: str = ""
     convert_add_queue: bool = False
+    update_check: bool = True      # look for a new version at start, at most once a day
+    update_checked_at: int = 0     # when GitHub was last asked (Unix time)
+    last_version: str = ""         # the version that ran last, to say "Updated to …" once
     geometry: str = ""             # Qt window geometry, hex
 
     @classmethod

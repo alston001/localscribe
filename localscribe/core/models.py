@@ -106,7 +106,8 @@ def hf_list_files(repo: str, token: str | None = None,
                                    params={"recursive": "true"}, timeout=30)
     except requests.RequestException as exc:
         raise UserError("err_network", detail=str(exc)) from exc
-    _check_auth(resp.status_code)
+    if token:  # 401/403 are about the token or the model's terms only when there is a token
+        _check_auth(resp.status_code)
     if resp.status_code >= 400:
         raise UserError("err_network", detail=f"HTTP {resp.status_code}")
     files = []
@@ -156,9 +157,11 @@ def _sha256(path: Path) -> str:
 
 def download_files(jobs: list[tuple], token: str | None = None,
                    progress: ProgressFn | None = None,
-                   cancel: threading.Event | None = None) -> None:
+                   cancel: threading.Event | None = None, verify_existing: bool = False) -> None:
     """Download (url, dest, size[, sha256]) jobs in order. Partial files resume; each file is
-    written to `<dest>.part` and renamed when complete and verified, so `dest` existing means done."""
+    written to `<dest>.part` and renamed when complete and verified, so `dest` existing means done.
+    verify_existing: check a finished `dest` against its SHA-256 again, and download it anew when
+    it doesn't match (an installer that sat on disk since an earlier session)."""
     import requests
 
     session = _session(token)
@@ -168,14 +171,16 @@ def download_files(jobs: list[tuple], token: str | None = None,
     done = 0
     for url, dest, size, sha256 in jobs:
         if dest.exists() and (size <= 0 or dest.stat().st_size == size):
-            done += size
-            report(done, total)
-            continue
+            if not (verify_existing and sha256 and _sha256(dest) != sha256.lower()):
+                done += size
+                report(done, total)
+                continue
+            _write_step(dest.unlink, dest)
         part = dest.with_name(dest.name + ".part")
         _write_step(lambda: dest.parent.mkdir(parents=True, exist_ok=True), dest.parent)
         for attempt in range(1, _ATTEMPTS + 1):
             try:
-                _download_one(session, url, part, size, done, total, report, cancel)
+                _download_one(session, url, part, size, done, total, report, cancel, bool(token))
                 break
             except requests.HTTPError as exc:
                 status = exc.response.status_code if exc.response is not None else 0
@@ -214,7 +219,7 @@ def _wait(seconds: float, cancel: threading.Event | None) -> None:
         raise Cancelled()
 
 
-def _download_one(session, url, part: Path, size, done_before, total, report, cancel) -> None:
+def _download_one(session, url, part: Path, size, done_before, total, report, cancel, with_token=False) -> None:
     pos = part.stat().st_size if part.exists() else 0
     if size > 0 and pos > size:
         part.unlink()
@@ -223,10 +228,11 @@ def _download_one(session, url, part: Path, size, done_before, total, report, ca
         return
     headers = {"Range": f"bytes={pos}-"} if pos else {}
     with session.get(url, headers=headers, stream=True, timeout=(20, 120)) as resp:
-        _check_auth(resp.status_code)
+        if with_token:  # without one, a 401/403 (e.g. from a proxy) is just a failed download
+            _check_auth(resp.status_code)
         if resp.status_code == 416:  # stale partial file
             part.unlink(missing_ok=True)
-            return _download_one(session, url, part, size, done_before, total, report, cancel)
+            return _download_one(session, url, part, size, done_before, total, report, cancel, with_token)
         resp.raise_for_status()
         if pos and resp.status_code != 206:  # server ignored the range request
             pos = 0

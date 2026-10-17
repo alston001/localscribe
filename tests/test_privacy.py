@@ -257,3 +257,25 @@ def test_explorer_is_started_by_its_full_path(monkeypatch, tmp_path):
     convert_dialog.ConvertDialog._reveal(None, item)
     assert [cmd[0] for cmd in started] == [os.path.join(r"C:\Windows", "explorer.exe")] * 2
     assert all(cmd[-1] == os.path.normpath(target) for cmd in started)
+
+
+# ---- D8: update checks -------------------------------------------------------------
+def test_an_update_check_asks_for_latest_json_and_sends_nothing_else(monkeypatch, tmp_path):
+    from localscribe.core import update
+
+    seen = []
+
+    class Session:
+        def get(self, url, **kwargs):
+            seen.append((url, kwargs))
+            return types.SimpleNamespace(status_code=404, url=url, history=[], close=lambda: None)
+
+    monkeypatch.setattr(models, "_session", lambda token=None: Session())
+    monkeypatch.setattr(update, "updates_dir", lambda: tmp_path)
+    with pytest.raises(UserError):  # no latest.json in that release
+        update.check(fetch=True)
+    (url, kwargs), = seen
+    assert url == "https://github.com/alston001/localscribe/releases/latest/download/latest.json"
+    assert set(kwargs) == {"timeout", "stream"}  # no query, cookies, extra headers or body
+    update.check(fetch=False)  # what the last check found: no request at all
+    assert len(seen) == 1

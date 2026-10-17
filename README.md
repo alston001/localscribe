@@ -39,6 +39,8 @@ Offline transcription with speaker identification for Windows. LocalScribe turns
 2. Put them in **one folder** and run the `.exe`. It installs for your user account only (no admin rights needed).
 3. The installer isn't code-signed, so Windows may say "Windows protected your PC". Click **More info → Run anyway**.
 
+**Updates**: from 0.1.4 on, LocalScribe checks for a new version when it starts, at most once a day. When there is one, a strip above the file list offers it. **Update** downloads it in the background, and **Restart now** installs it and opens LocalScribe again. It waits while a transcription runs, and settings, word banks and models are kept. Usually only the files that changed are downloaded, in a small update installer of about 75 MB; when bundled libraries such as PyTorch change, it is the full installer. Turn the check off, or check by hand, under **Settings → General → Updates**. A copy unzipped from the portable ZIP opens the download page instead. Each release also has `LocalScribe-Update-x.y.z.exe`, which updates the version before it by double-click.
+
 **Requirements**
 
 | | Minimum | Recommended |
@@ -148,7 +150,8 @@ The token is used only for that download and is never stored. Public releases do
 
 ## Privacy
 
-- All processing happens locally. The network is used only to download models
+- All processing happens locally. The network is used only to download models and, unless you turn it off, to check for a new version
+- The update check reads one file, `latest.json`, from this repository's GitHub releases, at most once a day. It sends none of your files or personal data; like any download, GitHub sees your IP address, and the request names the LocalScribe version. Updates come from the same releases and are checked against their SHA-256 when they arrive and again just before they run. Run as administrator, LocalScribe doesn't install updates itself; it opens the download page instead
 - pyannote.audio 4 sends usage telemetry by default; LocalScribe turns it off (`PYANNOTE_METRICS_ENABLED=false`)
 - The log file `%LOCALAPPDATA%\LocalScribe\localscribe.log` holds file names (not folders) and timings, never transcript text. The technical details of an unexpected error can include a file's location, so check them before you share the log
 - `_transcript.json` and the Excel export store the recording's file name, not its folder
@@ -167,13 +170,14 @@ The token is used only for that download and is never stored. Public releases do
 | pyannote download: "no access yet" | Sign in to Hugging Face and accept the conditions on the model page first |
 | Wrong number of speakers | Set the exact number under **Speakers**, or install pyannote |
 | A speaker's short replies are attributed to someone else | Common when people overlap. Proofread those spots; pyannote helps |
+| An update fails, or LocalScribe doesn't open again after **Restart now** | Run the full installer from Releases; it keeps settings, word banks and models. The update's log is in `%LOCALAPPDATA%\LocalScribe\updates\<version>\install.log` |
 | Running from source: "No Python at …" | `.venv` was created with a Python that isn't installed. Run `setup.bat` again (see below) |
 
 Logs for bug reports: `%LOCALAPPDATA%\LocalScribe\localscribe.log`.
 
 ## FAQ
 
-**Is it really offline?** Yes. After the models are downloaded, you can disconnect from the internet.
+**Is it really offline?** Yes. After the models are downloaded, you can disconnect from the internet. The only other connection is the update check, which stays quiet when there is no internet.
 
 **Which languages?** Whisper understands about 99 languages; pick one in the Language menu or use automatic detection. The interface is English or Traditional Chinese.
 
@@ -212,8 +216,11 @@ Tests:
 ```bat
 powershell -ExecutionPolicy Bypass -File packaging\build.ps1               :: builds dist\LocalScribe\
 "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" packaging\installer.iss   :: setup.exe + .bin parts
+.venv\Scripts\python.exe packaging\release_assets.py                       :: update installer + latest.json
 .venv\Scripts\python.exe packaging\make_zip.py [dist]                      :: or a portable ZIP
 ```
+
+`release_assets.py` writes three things into `dist`: the bundle's file list (`LocalScribe-<version>-files.json`), a small update installer with only the files that changed since the previous release, and `latest.json`, which installed copies read to find the update. The update installer needs the previous release's file list in `dist`; keep every release's file list. Create the GitHub release as a draft (`gh release create vX --draft …`) with the full installer, the update installer, the file list and `latest.json`. Publish it (`gh release edit vX --draft=false`) only once every upload is done and its SHA-256 matches. Installed copies look at the latest published release, so they never see a half-uploaded one. `tests/test_installers.py` compiles both installers from a tiny fake bundle and installs a test copy with them. It also runs LocalScribe's own update flow against a local server. It is opt-in (`set LOCALSCRIBE_INSTALLER_TESTS=1`).
 
 Optional extras, for internal (non-public) builds only: `LOCALSCRIBE_BUNDLE_PYANNOTE=1` bundles the pyannote model, and `LOCALSCRIBE_BUNDLE_WHISPER=large-v3,small` bundles Whisper models for computers without internet.
 
@@ -229,6 +236,7 @@ localscribe/
     align.py       assigns words to speakers and fixes boundary errors
     pipeline.py    runs the steps, caches models, falls back to the CPU if the GPU fails
     models.py      resumable model downloads
+    update.py      finds, downloads and starts updates (GitHub releases)
     transcript.py  transcript format (_transcript.json)
   export/        output formats
   ui/            PySide6 desktop interface
@@ -248,6 +256,8 @@ The code is under the [MIT License](LICENSE). Bundled third-party components and
 LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片轉成逐字稿並分辨說話人。所有處理都在自己的電腦上完成，錄音不會上傳。
 
 **安裝**：到 [Releases](https://github.com/alston001/localscribe/releases) 下載最新版本的所有檔案（`.exe` 和 `.bin`），放在同一個資料夾，再執行 `.exe`。不需要系統管理員權限。如果出現「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」。有 NVIDIA 顯示卡會快很多，沒有也能用。
+
+**更新**：從 0.1.4 起，LocalScribe 開啟時會檢查有沒有新版本，每天最多一次。有新版本時，檔案清單上方會出現提示：按「更新」在背景下載，下載好後按「立即重新啟動」就會安裝並自動重開。轉錄進行中會等完成；設定、詞庫和模型都會保留。通常只下載有變動的檔案，是約 75 MB 的小更新檔；內建的 PyTorch 等大型套件改版時，才會下載完整安裝檔。檢查時只會從本專案的 GitHub Releases 讀取一個版本資訊檔，不會傳送你的檔案或個人資料；GitHub 只看得到任何下載都有的資訊，例如 IP 位址和 LocalScribe 的版本。更新檔下載時和執行前都會核對 SHA-256。以系統管理員身分執行時，LocalScribe 不會自行安裝更新，而是開啟下載頁面。可以在「設定 → 一般 → 更新」關閉自動檢查，或按「立即檢查」。ZIP 免安裝版會改成開啟下載頁面。每個版本也會附上 `LocalScribe-Update-x.y.z.exe`，在前一版上雙擊就能更新。
 
 **使用**：把檔案拖進視窗，選好情境、語言和輸出格式，按「開始轉換」。第一次轉換會自動下載 Whisper 模型（有顯示卡約 3 GB，沒有約 480 MB），之後就完全離線。完成後雙擊該列可開啟逐字稿。要改成中文介面，請到「Settings → Interface language」選「繁體中文」。
 

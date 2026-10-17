@@ -127,6 +127,10 @@ QFrame#vocabularyPopup QListWidget {{ background: {SURFACE}; border: none; outli
 QFrame#vocabularyLine {{ background: {BORDER}; border: none; }}
 QPushButton#vocabularyNew {{ border: none; border-radius: 4px; text-align: left; padding: 7px 10px; color: {ACCENT}; font-weight: 600; }}
 QPushButton#vocabularyNew:hover {{ background: {WINDOW}; }}
+QFrame#updateBar {{ background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; }}
+QPushButton#updateAction {{ background: {ACCENT}; color: white; border: none; font-weight: 600; }}
+QPushButton#updateAction:hover {{ background: {ACCENT_DARK}; }}
+QPushButton#updateAction:disabled {{ background: #93C5FD; color: white; }}
 QStatusBar {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}
 QStatusBar QLabel {{ color: {MUTED}; padding: 0 10px; }}
 QStatusBar::item {{ border: none; }}
