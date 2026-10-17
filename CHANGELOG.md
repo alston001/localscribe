@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - **Even out volume no longer costs accuracy.** It used to transcribe the whole recording from volume-levelled audio. On three real lectures that recovered quiet speech the original audio missed, but it got more technical terms wrong (13 against 5 on one lecture) and put more speaker changes mid-sentence. Now Whisper always transcribes the original audio. The levelled copy is only used to find speech the original leaves without text, at the edges of a clip or as a pause of more than 3 seconds inside one, and just those stretches are transcribed from it. On the same lectures, terms stayed as accurate as without levelling (6 against 5), and the extra mid-sentence speaker changes fell by half or more. The quiet speech filled in (175 and 525 words on two lectures, as confident as normal speech) left every transcript with more words than the old way. It takes 9–27% longer than without levelling.
 - **When to use a word bank.** On two more lectures about other topics, the NLP bank gained nothing and wrote a few of its terms where they probably weren't said, and with a bank transcription took 30–60% longer. The word-bank menu, the editor and the README now say to pick a bank only for recordings that use its terms.

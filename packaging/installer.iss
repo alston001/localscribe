@@ -6,7 +6,7 @@
 ; Slices stay under 1.9 GB because GitHub release assets must be smaller than 2 GiB.
 
 #define AppName "LocalScribe"
-#define AppVersion "0.1.2"
+#define AppVersion "0.1.3"
 #define AppExe "LocalScribe.exe"
 #ifndef DistDir
   #define DistDir "..\dist\LocalScribe"
