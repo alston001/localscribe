@@ -224,4 +224,6 @@ def test_the_bundle_takes_opencc_and_its_dictionaries():
     spec = (ROOT / "packaging" / "localscribe.spec").read_text(encoding="utf-8")
     assert 'collect_data_files("opencc", includes=["clib/share/opencc/*"])' in spec
     assert 'collect_delvewheel_libs_directory("opencc"' in spec  # its msvcp140 copy
+    # The contributed hook takes the whole package: the spec leaves out what only building with OpenCC needs.
+    assert '_OPENCC_BUILD_ONLY = ("opencc/clib/bin/", "opencc/clib/include/", "opencc/clib/lib/")' in spec
     assert any(line.startswith("opencc==") for line in (ROOT / "requirements.txt").read_text().splitlines())
