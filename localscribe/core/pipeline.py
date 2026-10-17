@@ -19,7 +19,7 @@ from .. import __version__
 from . import chinese
 from . import device as dev
 from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
-from .asr import AsrResult, drop_sign_offs, lost_speech, text_gaps
+from .asr import AsrResult, drop_sign_offs, lost_speech, repeats, text_gaps
 from .diarization import SpeakerCount, Turn
 from .errors import Cancelled, UserError
 from .media import SAMPLE_RATE, load_audio, mmss
@@ -250,6 +250,7 @@ class Engine:
             self.log(f"{path.name}: removed {heard - len(asr.words)} word(s) of invented sign-offs (\"Thank you.\")")
         if not asr.words:
             raise UserError("err_no_speech")
+        repeated = repeats(asr.words)  # before the conversion, which may write one of the repeats differently
         if asr.language == "zh":  # not Japanese: its kanji are no Simplified characters
             asr.words = chinese.to_traditional(asr.words, opts.chinese_script, opts.keep_terms)
 
@@ -287,7 +288,8 @@ class Engine:
         elif self.settings.device == "cuda" and device == "cpu":
             self.log("Settings ask for the GPU, but no CUDA GPU is available; running on CPU")
             warnings.append({"key": "warn_cuda_unavailable"})
-        warnings += _lost_speech_warnings(lost)
+        warnings += _stretch_warnings("warn_lost_speech", lost)
+        warnings += _stretch_warnings("warn_repeats", repeated)  # a warning only: people do repeat themselves
         if diarize:
             warnings += _speaker_warnings(turns, len(transcript.speakers), opts.speakers)
         transcript.warnings = warnings
@@ -303,10 +305,10 @@ class Engine:
         return transcript
 
 
-def _lost_speech_warnings(stretches: list[tuple[float, float]]) -> list[dict]:
+def _stretch_warnings(key: str, stretches: list[tuple[float, float]]) -> list[dict]:
     if not stretches:
         return []
-    return [{"key": "warn_lost_speech", "times": ", ".join(f"{mmss(s)}–{mmss(e)}" for s, e in stretches)}]
+    return [{"key": key, "times": ", ".join(f"{mmss(s)}–{mmss(e)}" for s, e in stretches)}]
 
 
 def _speaker_warnings(turns: list[Turn], found: int, count: SpeakerCount) -> list[dict]:

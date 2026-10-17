@@ -126,6 +126,18 @@ def test_switched_off_keeps_simplified(fake_models, monkeypatch):
     assert transcript.settings["chinese_script"] == "off"
 
 
+def test_repeats_are_found_before_the_conversion_writes_one_differently(fake_models, monkeypatch):
+    # OpenCC reads the first 发展 here as part of 理发 (理髮), so after the conversion only three match.
+    transcript = run(fake_models, monkeypatch, "zh", chars("理发展很快" + "发展很快" * 3 + "。"))
+    assert [w["key"] for w in transcript.warnings] == ["warn_repeats"]
+
+
+def test_invented_chinese_credits_go_before_the_conversion(fake_models, monkeypatch):
+    words = chars("请不吝点赞订阅转发打赏支持明镜与点点栏目") + chars("我们用软件处理信息。", start=10.0)
+    transcript = run(fake_models, monkeypatch, "zh", words)
+    assert "".join(s.text for s in transcript.segments) == "我們用軟件處理信息。"
+
+
 # ---- settings and the command line ---------------------------------------------------
 def test_the_setting_defaults_to_characters_only_and_survives_a_restart(tmp_path):
     from localscribe.config import Settings

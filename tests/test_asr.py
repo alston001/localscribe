@@ -1,11 +1,14 @@
 """What the voice detector heard versus what Whisper wrote, with fake segments (no model needed)."""
 
+import re
+import time
 import types
+from dataclasses import replace
 
 import numpy as np
 
 from localscribe.core import asr
-from localscribe.core.asr import Word, drop_sign_offs, lost_speech, text_gaps
+from localscribe.core.asr import Word, drop_sign_offs, lost_speech, repeats, text_gaps
 
 
 def talk(start: float, end: float) -> list[Word]:
@@ -20,6 +23,19 @@ def say(*spec: tuple[str, float]) -> list[Word]:
 
 def text(words: list[Word]) -> str:
     return "".join(w.text for w in words)
+
+
+def zh(line: str, p: float = 0.9, start: float = 0.0) -> list[Word]:
+    """`line` split the way Whisper splits Chinese: a word per character, Latin words whole, a
+    space at the front of the word after it. 0.2 s apart."""
+    pieces = re.findall(r" ?[A-Za-z0-9.']+| ?\S", line)
+    return [Word(round(start + i * 0.2, 2), round(start + i * 0.2 + 0.18, 2), piece, p)
+            for i, piece in enumerate(pieces)]
+
+
+def unsure(words: list[Word], p: float = 0.2) -> list[Word]:
+    """`words` with Whisper unsure of the first one, as with the sign-offs it invents."""
+    return [replace(words[0], prob=p)] + words[1:]
 
 
 # ---- invented sign-offs --------------------------------------------------------------
@@ -97,6 +113,95 @@ def test_sentences_that_only_look_like_credits_are_kept():
                       (" list.", 0.9)),
                   say((" I'd", 0.9), (" like", 0.9), (" to", 0.9), (" share", 0.9), (" this.", 0.9))):
         assert drop_sign_offs(words) == words
+
+
+# ---- invented Chinese lines ----------------------------------------------------------
+def test_chinese_video_credits_are_dropped_however_sure_whisper_is():
+    # Whisper v2 and v3 write these on silence, music or noise, in either script (openai/whisper
+    # discussion #2244, SYSTRAN/faster-whisper issue #587). Nobody says them in a recording.
+    for line in ("请不吝点赞 订阅 转发 打赏支持明镜与点点栏目", "請不吝點贊 訂閱 轉發 打賞支持明鏡與點點欄目",
+                 "请不吝点赞订阅转发", "明镜需要您的支持 欢迎订阅明镜", "字幕志愿者 李宗盛", "中文字幕志願者 楊茜茜",
+                 "优优独播剧场——YoYo Television Series Exclusive", "小编字幕由Amara.org社区提供"):
+        assert drop_sign_offs(zh(line, p=0.95)) == [], line
+    # Only the credit goes: the lecture after it in the same clip stays.
+    words = zh("字幕由Amara.org社区提供") + zh("我们今天讲断词。", start=5.0)
+    assert text(drop_sign_offs(words)) == "我们今天讲断词。"
+    # Chinese runs on without spaces: a pause ends a line that came out on its own.
+    for line in ("明镜需要您的支持 欢迎订阅明镜", "字幕志愿者 李宗盛"):
+        words = zh(line) + zh("我们今天讲断词。", start=6.0)
+        assert text(drop_sign_offs(words)) == "我们今天讲断词。", line
+    words = say((" a", 0.9), (" long—", 0.9), (" YoYo", 0.9), (" Television", 0.9), (" Series", 0.9),
+                (" Exclusive", 0.9))
+    assert text(drop_sign_offs(words)) == " a long—"
+
+
+def test_long_runs_of_dashes_are_checked_quickly():
+    words = say(*[(" -", 0.9)] * 20000)
+    started = time.perf_counter()
+    assert drop_sign_offs(words) == words
+    assert time.perf_counter() - started < 2.0
+
+
+def test_chinese_sentences_that_only_look_like_credits_are_kept():
+    for line in ("我想当字幕志愿者。", "请订阅我们的电子报。", "明镜高悬。", "这部剧是优优独播的吗？", "请大家不吝指教。",
+                 "字幕志愿者很多。", "字幕志愿者招募中，欢迎报名。", "我们的字幕志愿者李老师，今天没来。", "欢迎订阅明镜周刊。"):
+        words = zh(line)
+        assert drop_sign_offs(words) == words, line
+    words = zh("字幕志愿者") + zh("很多。", start=3.0)  # a pause is no name after the credit
+    assert drop_sign_offs(words) == words
+
+
+def test_unsure_chinese_sign_offs_are_dropped():
+    # The Chinese "Thanks for watching", held to the rule for the English ones (see drop_sign_offs).
+    for line in ("谢谢观看", "謝謝觀看。", "感谢收看！", "谢谢大家的观看", "感謝您的收聽。", "多谢观看"):
+        assert drop_sign_offs(unsure(zh(line))) == [], line
+    words = zh("好，今天就到这里。") + unsure(zh("谢谢观看。", start=3.0))
+    assert text(drop_sign_offs(words)) == "好，今天就到这里。"
+    words = unsure(zh("谢谢观看")) + zh("我们开始上课。", start=3.0)  # a pause ends it, too
+    assert text(drop_sign_offs(words)) == "我们开始上课。"
+
+
+def test_spoken_chinese_thanks_are_kept():
+    for words in (zh("谢谢观看。"),                      # Whisper is sure of it: someone said it
+                  unsure(zh("谢谢大家。")),                # how lecturers end, never a sign-off
+                  unsure(zh("谢谢收看这个节目的观众。")),    # it goes on
+                  unsure(zh("谢谢观看，现在开始上课。")),
+                  unsure(zh("谢谢。观看。")), unsure(zh("谢谢大家。收听。")),  # two sentences
+                  zh("非常") + unsure(zh("感谢收看。", start=0.4))):      # inside a sentence
+        assert drop_sign_offs(words) == words, text(words)
+
+
+# ---- words that come out again and again ---------------------------------------------
+def test_a_sentence_that_keeps_coming_back_is_reported():
+    words = zh("我们来看一下这个例子。" * 4, start=10.0)
+    assert repeats(words) == [(10.0, words[-2].end)]  # from its first word to its last (before the 。)
+
+
+def test_a_phrase_looping_inside_a_sentence_is_reported():
+    words = zh("所以" + "我们来看一下" * 6 + "。")
+    assert repeats(words) == [(words[2].start, words[-2].end)]
+    words = say(*[(f" {w}", 0.9) for w in ("the model learns " * 5).split()])
+    assert repeats(words) == [(words[0].start, words[-1].end)]
+
+
+def test_short_or_few_repeats_are_not_reported():
+    # People say these: agreeing, hesitating, or saying a sentence again once.
+    for words in (zh("对对对对对对。"), zh("好的好的好的。"), zh("可以吗可以吗可以吗？"), zh("哈哈哈哈哈哈哈哈哈哈。"),
+                  say(*[(" no,", 0.9)] * 4), say(*[(" Okay.", 0.9)] * 5), zh("我们来看一下这个例子。" * 3),
+                  say(*[(f" {w}", 0.9) for w in ("can you hear me " * 3).split()])):
+        assert repeats(words) == [], text(words)
+
+
+def test_a_short_loop_is_reported_when_it_goes_on():
+    # Too short to count three or four times, but Whisper loops on these for a whole clip.
+    for words in (say(*[(" Thank", 0.9), (" you.", 0.9)] * 30), zh("嗯" * 40), zh("谢谢" * 15)):
+        assert repeats(words) == [(words[0].start, words[-1].end)], text(words)[:20]
+
+
+def test_a_long_sentence_that_comes_back_is_reported():
+    sentence = "".join(chr(0x4E00 + 7 * i) for i in range(72)) + "。"  # 72 different characters
+    words = zh(sentence * 5)
+    assert repeats(words) == [(words[0].start, words[-2].end)]
 
 
 # ---- lost speech -------------------------------------------------------------------

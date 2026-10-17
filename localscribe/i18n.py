@@ -320,6 +320,9 @@ STRINGS: dict[str, tuple[str, str]] = {
     "warn_lost_speech": ("{times} 偵測到說話聲，卻沒有轉出任何文字，請聽一下是否有遺漏。",
                          "No text came out for {times}, although speech was detected there. "
                          "Please listen to check whether something is missing."),
+    "warn_repeats": ("{times} 同樣的字句連續出現好幾次，可能是 Whisper 卡住了，請聽一下原音。",
+                     "The same words come out several times in a row at {times}. Whisper may have got stuck "
+                     "there; please listen to check."),
     # export headings
     "exp_source": ("原始檔案", "Source file"),
     "exp_date": ("轉錄日期", "Transcribed"),
