@@ -63,8 +63,8 @@ def test_main_window_close_waits_instead_of_destroying_a_running_thread(monkeypa
     asked, told = [], []
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(1) or QMessageBox.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: told.append(a[-1]))
-    window = types.SimpleNamespace(worker=FakeThread(), _helpers=[], _closing=False, _pending_installer=None,
-                                   update_bar=FakeUpdateBar())
+    window = types.SimpleNamespace(_proofreaders={}, worker=FakeThread(), _helpers=[], _closing=False,
+                                   _pending_installer=None, update_bar=FakeUpdateBar())
     event = FakeEvent()
     main_window.MainWindow.closeEvent(window, event)
     assert event.result == "ignored" and window.worker.cancel.is_set() and len(told) == 1
@@ -78,8 +78,8 @@ def test_main_window_close_waits_for_helper_threads(monkeypatch):
     from PySide6.QtWidgets import QMessageBox
 
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
-    window = types.SimpleNamespace(worker=None, _helpers=[FakeThread()], _closing=False, _pending_installer=None,
-                                   update_bar=FakeUpdateBar())
+    window = types.SimpleNamespace(_proofreaders={}, worker=None, _helpers=[FakeThread()], _closing=False,
+                                   _pending_installer=None, update_bar=FakeUpdateBar())
     event = FakeEvent()
     main_window.MainWindow.closeEvent(window, event)
     assert event.result == "ignored"

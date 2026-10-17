@@ -138,8 +138,8 @@ def closing_window(installer=None, bar=None):
     from localscribe.config import Settings
 
     saved = []
-    window = types.SimpleNamespace(worker=None, _helpers=[], _closing=False, _pending_installer=installer,
-                                   update_bar=bar or FakeBar(), settings=Settings(),
+    window = types.SimpleNamespace(_proofreaders={}, worker=None, _helpers=[], _closing=False,
+                                   _pending_installer=installer, update_bar=bar or FakeBar(), settings=Settings(),
                                    saveGeometry=lambda: QByteArray(b"geometry"), _save_settings=lambda: saved.append(1))
     return window, saved
 
