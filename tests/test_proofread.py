@@ -101,7 +101,10 @@ def test_saving_writes_the_transcript_and_its_formats_again(tmp_path):
     json_path = next(p for p in written if p.suffix == ".json")
     (tmp_path / "other_transcript.txt").write_text("someone else's", encoding="utf-8")
     proofread.set_text(t, 1, "Thank you, Sam.")
+    proofread.set_speaker(t, 1, "S1")
     rewritten = proofread.save(t, json_path, ExportOptions())
+    assert t.speakers == {"S1": "Speaker 1", "S2": "Speaker 2"}  # the window may still give S2 a segment
+    assert Transcript.load(json_path).speakers == {"S1": "Speaker 1"}
     assert sorted(p.name for p in rewritten) == sorted(p.name for p in written)  # the same files, no new ones
     assert "Thank you, Sam." in (tmp_path / "class_transcript.txt").read_text(encoding="utf-8")
     assert Transcript.load(json_path).segments[1].text == "Thank you, Sam."

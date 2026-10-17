@@ -10,6 +10,7 @@ import bisect
 import os
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from ..export import FORMATS
@@ -129,9 +130,11 @@ def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
     """Writes `t` over `json_path` and its formats (outputs_of) again, so the files from its run
     say what the proofread transcript says; returns them. Everything is written to a staging
     folder first, and nothing is replaced while a file is held open by another program (Word
-    locks a document it shows). The transcript goes last, so the exports are never newer."""
+    locks a document it shows). The transcript goes last, so the exports are never newer.
+    Speakers left without segments are not written; `t` itself keeps them."""
     json_path = Path(json_path)
-    drop_unused_speakers(t)
+    used = {seg.speaker for seg in t.segments}
+    t = replace(t, speakers={sid: name for sid, name in t.speakers.items() if sid in used})
     targets = outputs_of(json_path)
     for path in [*targets.values(), json_path]:
         if path.exists():

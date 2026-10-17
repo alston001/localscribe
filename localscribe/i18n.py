@@ -328,6 +328,7 @@ STRINGS: dict[str, tuple[str, str]] = {
     "pr_pause": ("暫停", "Pause"),
     "pr_play_from_here": ("從這裡播放", "Play from here"),
     "pr_save": ("儲存", "Save"),
+    "pr_undo": ("復原", "Undo"),
     "pr_speakers": ("說話人", "Speakers"),
     "pr_rename_hint": ("雙擊名稱可以改名。雙擊表格裡的時間會從那裡播放，空白鍵播放或暫停，雙擊文字可以修改。",
                        "Double-click a name to rename it. Double-click a time to play from there, press Space to play "

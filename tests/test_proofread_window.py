@@ -116,6 +116,17 @@ window.toggle_play()
 out["merged"] = window.merge_speaker("S2", "S1")
 app.processEvents()
 out["speakers_merged"] = dict(window.t.speakers)
+window.undo()
+app.processEvents()
+out["unmerged"] = [dict(window.t.speakers), [s.speaker for s in window.t.segments]]
+window.merge_speaker("S2", "S1")
+window.delete_segment(0)
+out["rows_after_delete"] = model.rowCount()
+window.undo()
+out["rows_after_undo"] = [model.rowCount(), model.index(0, TEXT).data()]
+model.setData(model.index(2, TEXT), "Let us start.")
+window.undo()
+out["text_undone"] = model.index(2, TEXT).data()
 out["saved"] = window.save()
 out["clean_title"] = not window.windowTitle().startswith("* ")
 out["txt"] = (folder / "class_transcript.txt").read_text(encoding="utf-8")
@@ -123,6 +134,10 @@ saved = Transcript.load(json_path)
 out["json_speakers"] = saved.speakers
 out["json_texts"] = [s.text for s in saved.segments]
 
+model.setData(model.index(0, TEXT), "Hello again.")
+out["dirty_after_edit"] = window.dirty
+window.undo()
+out["clean_after_undo"] = not window.dirty and not window.windowTitle().startswith("* ")
 model.setData(model.index(0, TEXT), "Hello again.")
 QMessageBox.exec = lambda self: self.button(QMessageBox.Cancel).click()
 window.close()
@@ -180,6 +195,10 @@ def test_the_proofreading_window(tmp_path):
     assert out["streams"] == 1 and out["row_follows"] == 1  # the audio reached the second segment
     assert out["paused"] and out["resumed_at"] == 1.6  # play again goes on where the pause stopped
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
+    assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
+    assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]
+    assert out["text_undone"] == "Let's start."
+    assert out["dirty_after_edit"] and out["clean_after_undo"]
     assert out["saved"] and out["clean_title"]
     assert "Thank you, Sam." in out["txt"] and "Speaker 2" not in out["txt"]
     assert out["json_speakers"] == {"S1": "Prof. Lee"}

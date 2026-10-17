@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import logging
 from pathlib import Path
+from typing import Callable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRect, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QTextDocument
@@ -61,7 +62,7 @@ class RecordingLoader(QThread):
 
 
 class SegmentModel(QAbstractTableModel):
-    edited = Signal()
+    edited = Signal(object, str, str)  # the segment, its field ("text" or "speaker"), the old value
 
     def __init__(self, transcript: Transcript, parent=None):
         super().__init__(parent)
@@ -106,21 +107,25 @@ class SegmentModel(QAbstractTableModel):
     def setData(self, index: QModelIndex, value, role=Qt.EditRole) -> bool:
         if role != Qt.EditRole or not index.isValid():
             return False
-        row = index.row()
+        row, seg = index.row(), self.t.segments[index.row()]
         if index.column() == TEXT:
-            changed = proofread.set_text(self.t, row, str(value))
+            field, old, changed = "text", seg.text, proofread.set_text(self.t, row, str(value))
         elif index.column() == SPEAKER:
-            changed = proofread.set_speaker(self.t, row, str(value))
+            field, old, changed = "speaker", seg.speaker, proofread.set_speaker(self.t, row, str(value))
         else:
-            changed = False
+            return False
         if changed:
-            self.dataChanged.emit(self.index(row, 0), self.index(row, 2))
-            self.edited.emit()
+            self.row_changed(row)
+            self.edited.emit(seg, field, old)
         return changed
 
-    def refresh(self) -> None:
-        self.beginResetModel()
-        self.endResetModel()
+    def row_changed(self, row: int) -> None:
+        self.dataChanged.emit(self.index(row, 0), self.index(row, 2))
+
+    def speakers_changed(self) -> None:
+        """Names changed: the speaker column only, since laying out every row again takes a while."""
+        if self.t.segments:
+            self.dataChanged.emit(self.index(0, SPEAKER), self.index(len(self.t.segments) - 1, SPEAKER))
 
 
 class SpeakerDelegate(QStyledItemDelegate):
@@ -208,6 +213,8 @@ class ProofreadWindow(QMainWindow):
         self.settings = settings
         self.t = Transcript.load(self.json_path)  # UserError for an unreadable or newer file: the caller says so
         self.dirty = False
+        self._undo: list[Callable[[], None]] = []  # each undoes one edit, the last one last
+        self._saved_depth = 0  # len(self._undo) when the files last said what the window says
         self.player: Player | None = None
         self._loader: RecordingLoader | None = None
         self._resume_at: float | None = None  # where a pause stopped, while the same row is current
@@ -235,16 +242,19 @@ class ProofreadWindow(QMainWindow):
         self.lbl_time = QLabel("0:00")
         self.btn_find = QPushButton(tr("pr_find_recording"), clicked=self.find_recording)
         self.btn_find.setVisible(self.recording is None)
+        self.btn_undo = QPushButton(tr("pr_undo"), clicked=self.undo, enabled=False)
+        self.btn_undo.setToolTip(QKeySequence(QKeySequence.Undo).toString(QKeySequence.NativeText))
         self.btn_save = QPushButton(tr("pr_save"), objectName="primary", clicked=self.save)
         bar.addWidget(self.btn_play)
         bar.addWidget(self.lbl_time)
         bar.addWidget(self.btn_find)
         bar.addStretch(1)
+        bar.addWidget(self.btn_undo)
         bar.addWidget(self.btn_save)
         root.addLayout(bar)
 
         self.model = SegmentModel(self.t, self)
-        self.model.edited.connect(self._mark_dirty)
+        self.model.edited.connect(self._on_cell_edited)
         self.table = SegmentTable()
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -298,6 +308,7 @@ class ProofreadWindow(QMainWindow):
         self.statusBar().addWidget(self.lbl_status, 1)
 
         QShortcut(QKeySequence.Save, self, activated=self.save)
+        QShortcut(QKeySequence.Undo, self, activated=self.undo)  # an open editor undoes its own typing first
         self.timer = QTimer(self, interval=100)
         self.timer.timeout.connect(self._tick)
 
@@ -305,9 +316,38 @@ class ProofreadWindow(QMainWindow):
         title = tr("pr_title", name=self.json_path.name) + f" — {APP_NAME}"
         self.setWindowTitle(("* " if self.dirty else "") + title)
 
-    def _mark_dirty(self) -> None:
-        self.dirty = True
+    # -------------------------------------------------------------------- undo
+    def _remember(self, undo: Callable[[], None]) -> None:
+        self._undo.append(undo)
+        if len(self._undo) > 500:
+            del self._undo[0]
+            self._saved_depth -= 1  # below 0 the saved state can't come back by undoing
+        self._update_dirty()
+
+    def _update_dirty(self) -> None:
+        self.dirty = len(self._undo) != self._saved_depth
+        self.btn_undo.setEnabled(bool(self._undo))
         self._update_title()
+
+    def undo(self) -> None:
+        if self._undo:
+            self._undo.pop()()
+            self._update_dirty()
+
+    def _row_of(self, seg) -> int | None:
+        return next((i for i, s in enumerate(self.t.segments) if s is seg), None)  # by identity: equal ones may repeat
+
+    def _on_cell_edited(self, seg, field: str, old: str) -> None:
+        def undo():
+            setattr(seg, field, old)
+            row = self._row_of(seg)
+            if row is not None:
+                self.model.row_changed(row)
+            if field == "speaker":
+                QTimer.singleShot(0, self._fill_speakers)
+        self._remember(undo)
+        if field == "speaker":
+            QTimer.singleShot(0, self._fill_speakers)  # talk times
 
     # ---------------------------------------------------------------- speakers
     def _fill_speakers(self) -> None:
@@ -338,9 +378,11 @@ class ProofreadWindow(QMainWindow):
             QTimer.singleShot(0, self._fill_speakers)  # an empty name: show the old one again
 
     def rename_speaker(self, speaker_id: str, name: str) -> bool:
+        old = self.t.speakers.get(speaker_id)
         if not proofread.rename_speaker(self.t, speaker_id, name):
             return False
-        self._after_speaker_change()
+        self._remember(lambda: (self.t.speakers.__setitem__(speaker_id, old), self._speakers_changed()))
+        self._speakers_changed()
         return True
 
     def _merge_menu(self) -> None:
@@ -359,23 +401,33 @@ class ProofreadWindow(QMainWindow):
             self.merge_speaker(source, target)
 
     def merge_speaker(self, source: str, target: str) -> int:
+        before = list(self.t.speakers.items())
+        segments = [seg for seg in self.t.segments if seg.speaker == source]
         moved = proofread.merge_speakers(self.t, source, target)
-        if source not in self.t.speakers:
-            self._after_speaker_change()
+        if source in self.t.speakers:
+            return 0  # nothing happened
+
+        def undo():
+            self.t.speakers.clear()
+            self.t.speakers.update(before)  # in the order they had
+            for seg in segments:
+                seg.speaker = source
+            self._speakers_changed()
+        self._remember(undo)
+        self._speakers_changed()
         return moved
 
     def new_speaker(self) -> str:
         sid = proofread.add_speaker(self.t, f"{self.settings.speaker_label or 'Speaker'} {len(self.t.speakers) + 1}")
-        self._mark_dirty()
+        self._remember(lambda: (self.t.speakers.pop(sid, None), self._speakers_changed()))
         self._fill_speakers()
         item = self.speaker_list.item(self.speaker_list.count() - 1)
         self.speaker_list.setCurrentItem(item)
         self.speaker_list.editItem(item)
         return sid
 
-    def _after_speaker_change(self) -> None:
-        self._mark_dirty()
-        self.model.refresh()
+    def _speakers_changed(self) -> None:
+        self.model.speakers_changed()
         # Later: a rename arrives from the list's own itemChanged, and refilling now would delete that item.
         QTimer.singleShot(0, self._fill_speakers)
 
@@ -395,10 +447,17 @@ class ProofreadWindow(QMainWindow):
             self.delete_segment(row)
 
     def delete_segment(self, row: int) -> None:
+        seg = self.t.segments[row]
         self.model.beginRemoveRows(QModelIndex(), row, row)
         proofread.delete_segment(self.t, row)
         self.model.endRemoveRows()
-        self._mark_dirty()
+
+        def undo():  # the edits after this one are undone already, so the row is where it was
+            self.model.beginInsertRows(QModelIndex(), row, row)
+            self.t.segments.insert(row, seg)
+            self.model.endInsertRows()
+            self._fill_speakers()
+        self._remember(undo)
         self._fill_speakers()
 
     def _on_double_click(self, index: QModelIndex) -> None:
@@ -506,9 +565,8 @@ class ProofreadWindow(QMainWindow):
         except UserError as exc:
             QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
             return False
-        self.dirty = False
-        self._update_title()
-        self._fill_speakers()
+        self._saved_depth = len(self._undo)
+        self._update_dirty()
         self.lbl_status.setText(tr("pr_saved", n=len(written)))
         return True
 
