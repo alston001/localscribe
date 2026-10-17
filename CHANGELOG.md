@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A proofreading window.** Right-click a finished file and choose **Proofread**, or click **Proofread…** and pick a `_transcript.json`. Its segments are listed with their time and speaker, and the words Whisper was unsure of are in yellow. Double-click a time to play the recording from there; Space plays and pauses, and the list follows the audio. Double-click a text or a speaker to correct it, and rename, merge or add speakers in the list beside it. **Undo** (Ctrl+Z) takes back the last edit. **Save** writes the transcript and the files that came out of its run again. It asks first when one of them changed after the transcript was saved, for instance in Word, and stops with a message while one is open in another program. For playback, the recording is decoded into memory as for transcription, so every format plays and no audio is written to disk. When the recording isn't next to the transcript, **Find the recording…** points to it.
+
+### 中文摘要
+
+- **校對視窗**：在完成的檔案上按右鍵選「校對」，或按「校對…」選一份 `_transcript.json`。每一段會列出時間和說話人，Whisper 沒把握的字以黃色標出。雙擊時間會從那裡播放錄音，空白鍵播放或暫停，清單會跟著聲音移動。雙擊文字或說話人可以修改，旁邊的說話人清單可以改名、合併或新增。「復原」（Ctrl+Z）可以取消上一個修改。「儲存」會重寫逐字稿和那次轉錄產生的檔案；如果其中有檔案在逐字稿存檔後又被改過（例如在 Word 裡編輯），會先詢問，檔案正被其他程式開啟時則會提醒你先關閉。播放時錄音會像轉錄時一樣解碼到記憶體裡，所以各種格式都能播放，也不會寫出任何音檔。錄音不在逐字稿旁邊時，可以用「找錄音…」指定。
+
 ## 0.1.5
 
 - **Chinese in Traditional characters.** Whisper often writes Chinese in Simplified characters, also for speakers from Taiwan. Chinese transcripts are now converted to Traditional characters with [OpenCC](https://github.com/BYVoid/OpenCC) in every format, `_transcript.json` included. Only the script changes (软件 becomes 軟件, 处理 becomes 處理), so the words the speaker used stay. *Taiwan wording* under **Settings → Transcription → Chinese output** also swaps Mainland terms for Taiwan's (软件 becomes 軟體, 文件 becomes 檔案), which can change what was actually said; *As Whisper wrote it* keeps the text as it was. On the command line, use `--chinese`. Each word keeps its time and confidence; where a phrase changes length (代码 becomes 程式碼 with Taiwan wording), its words share the new text. Terms in the word bank and in Names and terms keep the spelling you gave them, and 台 stays 台 rather than OpenCC's formal 臺. Japanese is never converted.
