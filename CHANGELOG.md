@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
 
 - **Updates without downloading everything again.** LocalScribe now checks for a new version when it starts, at most once a day, and offers it in a strip above the file list. **Update** downloads it in the background, and **Restart now** installs it and opens LocalScribe again. It waits while a transcription runs, and settings, word banks and models are kept. Usually only the files that changed are downloaded: between 0.1.0 and 0.1.3, 5 of the 5,145 files in the program folder changed, about 75 MB compressed, against 2.8 GB for the full installer. When bundled libraries such as PyTorch change, the full installer is downloaded instead. Each release now also has `LocalScribe-Update-x.y.z.exe`, which updates the version before it by double-click. The check reads one file from this repository's GitHub releases and sends none of your files or personal data (GitHub sees your IP address, as with any download, and the request names the LocalScribe version). Every download is checked against its SHA-256 when it arrives and again just before it runs. If an update fails, the version that was installed opens again and the same update can be retried. Turn the check off, or check by hand, under **Settings → General → Updates**. A copy from the portable ZIP opens the download page instead. Older versions don't check yet, so this one is installed by hand once; from 0.1.3, the small update installer is enough.
 

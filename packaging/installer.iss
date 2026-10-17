@@ -14,7 +14,7 @@
   #define AppGuid "8F3C2A51-6E4B-4D7A-9C1E-2B5F7A9D0E13"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.4"
 #endif
 #define AppExe "LocalScribe.exe"
 #ifndef DistDir
