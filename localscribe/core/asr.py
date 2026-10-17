@@ -115,10 +115,9 @@ def repeats(words: list[Word], times: int = _REPEAT_TIMES) -> list[tuple[float, 
     a sentence that comes back again and again, or a phrase looping inside one. Whisper can get
     stuck like this, while people seldom say a thing four times running: on five English
     lectures, three times in a row came out for three short phrases at a speaking pace, four times
-    for none. What repeats must
-    hold at least 4 Chinese characters or 3 other words, so 對對對, 好的好的好的 or "no, no, no"
-    don't count, unless it goes on and on (嗯 or "Thank you." for a whole clip). Punctuation and
-    case are ignored."""
+    for none. What repeats must hold at least 4 Chinese characters or 3 other words, so 對對對,
+    好的好的好的 or "no, no, no" don't count, unless it goes on and on (嗯 or "Thank you." for a
+    whole clip). Punctuation and case are ignored."""
     tokens, owner = [], []  # each Chinese character or other word, and the index of its word
     for k, word in enumerate(words):
         for token in _TOKENS.findall(word.text.lower()):
