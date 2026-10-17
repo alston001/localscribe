@@ -336,10 +336,22 @@ def test_invented_thank_you_is_removed(fake_models):
     assert " ".join(s.text for s in transcript.segments) == "Hello, everyone. Thanks Sam."
 
 
+def test_words_that_come_out_again_and_again_warn(fake_models, monkeypatch):
+    # Whisper stuck in a loop: the text stays as it came out, and a warning says where.
+    long_recording(monkeypatch)
+    loop = [Word(65.0 + i * 0.4, 65.3 + i * 0.4, f" {w}", 0.9) for i, w in enumerate(("the model learns " * 4).split())]
+    FakeTranscriber.words = WORDS + loop
+    engine = make_engine(fake_models, device="cpu")
+    transcript = engine.transcribe_file(fake_models / "class.wav", JobOptions(speakers=SpeakerCount(exact=1)))
+    assert transcript.warnings == [{"key": "warn_repeats", "times": "1:05–1:10"}]
+    assert "1:05–1:10" in i18n.tr_in("en", **transcript.warnings[0])
+    assert " ".join(s.text for s in transcript.segments).count("learns") == 4
+
+
 # ---- shared ------------------------------------------------------------------------
 def test_every_warning_has_both_languages():
     for key in ("err_no_speech", "warn_partial_decode", "warn_gpu_fallback", "warn_no_turns",
-                "warn_fewer_speakers", "warn_cuda_unavailable", "warn_lost_speech", "st_done_warn"):
+                "warn_fewer_speakers", "warn_cuda_unavailable", "warn_lost_speech", "warn_repeats", "st_done_warn"):
         assert key in i18n.STRINGS and all(i18n.STRINGS[key]), key
 
 
