@@ -50,6 +50,10 @@ a = Analysis(
               "PySide6.QtWebEngineCore", "PySide6.QtQml", "PySide6.QtQuick", "PySide6.Qt3DCore"],
     noarchive=False,
 )
+# sounddevice's hook brings every PortAudio build it ships: 32-bit, ARM, macOS and ASIO ones too. It
+# loads libportaudio64bit.dll unless SD_ENABLE_ASIO is set, and the ASIO SDK has a license of its own.
+a.binaries = [entry for entry in a.binaries if "portaudio-binaries" not in entry[0].replace("\\", "/")
+              or Path(entry[0]).name == "libportaudio64bit.dll"]
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,

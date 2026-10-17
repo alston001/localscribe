@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -137,6 +138,13 @@ def test_a_locked_file_stops_the_save_before_anything_is_replaced(tmp_path, monk
         proofread.save(t, json_path, ExportOptions())
     assert caught.value.key == "err_file_in_use" and caught.value.kwargs["path"] == str(locked)
     assert {p.name: p.read_bytes() for p in written} == before
+
+
+def test_the_bundle_takes_sounddevice_with_one_portaudio_library():
+    root = Path(__file__).resolve().parent.parent
+    spec = (root / "packaging" / "localscribe.spec").read_text(encoding="utf-8")
+    assert 'Path(entry[0]).name == "libportaudio64bit.dll"' in spec  # not the ASIO or other builds
+    assert any(line.startswith("sounddevice==") for line in (root / "requirements.txt").read_text().splitlines())
 
 
 # ---- playback ---------------------------------------------------------------------------
