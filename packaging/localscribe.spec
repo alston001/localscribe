@@ -8,7 +8,8 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import (collect_data_files, collect_delvewheel_libs_directory, collect_dynamic_libs,
+                                     collect_submodules, copy_metadata)
 
 ROOT = Path(SPECPATH).parent
 MODELS = ROOT / "models"
@@ -24,6 +25,9 @@ for pkg in ("pyannote.audio", "pyannote.pipeline", "pyannote.core", "pyannote.da
     hiddenimports += collect_submodules(pkg)
 for pkg in ("ctranslate2", "sherpa_onnx", "onnxruntime", "torchcodec"):
     binaries += collect_dynamic_libs(pkg)
+# OpenCC: its dictionaries (not its command-line tools and C headers), and the msvcp140 copy its wheel carries.
+datas += collect_data_files("opencc", includes=["clib/share/opencc/*"])
+datas, binaries = collect_delvewheel_libs_directory("opencc", datas=datas, binaries=binaries)
 # importlib.metadata lookups (pyannote's dependency check, opentelemetry entry points, lightning)
 for dist in ("pyannote.audio", "faster-whisper", "ctranslate2", "sherpa-onnx", "torch", "torchaudio"):
     datas += copy_metadata(dist, recursive=True)

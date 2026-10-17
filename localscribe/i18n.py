@@ -158,6 +158,17 @@ STRINGS: dict[str, tuple[str, str]] = {
     "hotwords_tip": ("幫助 Whisper 拼對人名、地名或術語，用逗號分隔（選填）",
                      "Helps Whisper spell names and jargon correctly; separate with commas (optional)"),
     "hotwords_placeholder": ("例如：Dr. Patel, NVivo, MATLAB", "e.g. Dr. Patel, NVivo, MATLAB"),
+    "zh_script": ("中文輸出", "Chinese output"),
+    "zh_tw_phrases": ("繁體中文（台灣用語）", "Traditional Chinese, Taiwan wording"),
+    "zh_tw": ("繁體中文（只轉字）", "Traditional Chinese, characters only"),
+    "zh_off": ("不轉換（保留 Whisper 的寫法）", "As Whisper wrote it (often Simplified)"),
+    "zh_script_tip": ("Whisper 轉出的中文常是簡體字。「只轉字」只換成繁體字（「软件」變成「軟件」），講者用的詞不變。"
+                      "「台灣用語」還會把大陸用詞換成台灣的說法（「文件」變成「檔案」、「打开」變成「開啟」），"
+                      "可能改掉講者實際說的詞。詞庫和「專有名詞」裡的寫法不會被改。",
+                      "Whisper often writes Chinese in Simplified characters. Characters only changes just the script "
+                      "(软件 becomes 軟件) and keeps the speaker's words. Taiwan wording also swaps Mainland terms for "
+                      "Taiwan's (文件 becomes 檔案, 打开 becomes 開啟), so it can change what the speaker actually said. "
+                      "Words in your word bank and in Names and terms keep their spelling."),
     # word banks: picker in the main window, editor, check before a run
     "vocabulary": ("詞庫", "Word bank"),
     "vocabulary_tip": ("專有名詞清單（例如一個主題一個），幫助 Whisper 拼對術語。只在錄音真的會講到這些詞時才選，"

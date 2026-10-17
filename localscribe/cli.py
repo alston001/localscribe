@@ -16,6 +16,7 @@ from .core import device as dev
 dev.prepare_environment()
 
 from . import i18n, paths  # noqa: E402
+from .core import chinese  # noqa: E402
 from .core.diarization import SpeakerCount  # noqa: E402
 from .core.errors import Cancelled, UserError  # noqa: E402
 from .core.pipeline import Engine, EngineSettings, JobOptions, Progress  # noqa: E402
@@ -64,6 +65,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--hotwords", default="", help="names and terms to help spelling")
     p.add_argument("--vocabulary", default="", metavar="NAME",
                    help="a word bank made in the app; its terms come before --hotwords")
+    p.add_argument("--chinese", default="tw", choices=list(chinese.STYLES),
+                   help="Chinese text: Traditional characters only (tw), Traditional with Taiwan wording, which "
+                        "can change the words that were said (tw_phrases), or as Whisper wrote it (off)")
     p.add_argument("--models-dir", type=Path, default=None)
     p.add_argument("--headings", default="en", choices=list(i18n.LANGUAGES), help="language of headings in files")
     args = p.parse_args(argv)
@@ -90,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                                    diarizer=args.diarizer),
                     log=lambda m: print(f"\r  {m}".ljust(90)))
     terms = prompt_terms(vocabulary, args.hotwords)
+    keep = tuple(terms)  # all of them, also any that don't fit Whisper's limit
     if terms:  # "auto" names the model by its GPU check, which the first file needs anyway
         counter = token_counter(engine.store, engine.whisper_name(), args.language)
         kept, dropped = fit_terms(terms, counter)
@@ -103,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     opts = JobOptions(language=None if args.language == "auto" else args.language,
                       speakers=args.speakers, normalize=args.normalize,
                       denoise=args.denoise, hotwords=prompt_text(terms, args.language),
-                      speaker_prefix=args.speaker_label)
+                      speaker_prefix=args.speaker_label, chinese_script=args.chinese, keep_terms=keep)
     export_options = ExportOptions(lang=args.headings, timestamps=not args.no_timestamps,
                                    mark_uncertain=args.mark_uncertain)
 

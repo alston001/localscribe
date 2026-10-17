@@ -97,6 +97,7 @@ Settings dialog:
 | Model | *Automatic* picks large-v3 on a GPU and small on a CPU. large-v3-turbo is much faster with slightly lower accuracy |
 | Device | *Automatic*, NVIDIA GPU or CPU. If the GPU fails, Automatic switches to the CPU by itself |
 | Names and terms | Comma-separated names and jargon (e.g. `Dr. Patel, NVivo`) to help Whisper spell them. Handy for one-off names; they are added after the chosen word bank's terms |
+| Chinese output | Whisper often writes Chinese in Simplified characters. *Traditional Chinese, characters only* (the default) converts it with [OpenCC](https://github.com/BYVoid/OpenCC) and changes just the script (软件 becomes 軟件), so the speaker's words stay. *Taiwan wording* also swaps Mainland terms for Taiwan's (软件 becomes 軟體, 文件 becomes 檔案), which can change what was actually said. *As Whisper wrote it* keeps the text as it was. Terms in your word bank and in Names and terms keep their spelling, and 台 stays 台 |
 | Speaker diarization engine | *Automatic* uses pyannote when it is installed, otherwise sherpa-onnx |
 | Model folder | Where models are stored and downloaded |
 
@@ -271,6 +272,8 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 
 **pyannote（選用、免費）**：註冊 Hugging Face 帳號，到模型頁面同意條款，建立一組 Read token，再到「設定 → 語者分離」貼上並下載。分辨聲音相近的人比內建的 sherpa-onnx 準，用顯示卡也快很多。沒有安裝時會自動改用 sherpa-onnx。
 
-**準確度**：用一份 78 分鐘的上課錄音測試，和 iPhone 語音備忘錄內建的逐字稿比較（兩邊都不當作標準答案），約 88% 的字一致；不一致的地方，LocalScribe 在專有名詞上通常比較合理。逐字稿務必校對，特別是人名、專有名詞，以及多人同時說話的段落。中文目前可能輸出簡體字。
+**準確度**：用一份 78 分鐘的上課錄音測試，和 iPhone 語音備忘錄內建的逐字稿比較（兩邊都不當作標準答案），約 88% 的字一致；不一致的地方，LocalScribe 在專有名詞上通常比較合理。逐字稿務必校對，特別是人名、專有名詞，以及多人同時說話的段落。
+
+**中文輸出**：Whisper 轉出的中文常是簡體字。LocalScribe 預設用 OpenCC 只把字轉成繁體（「软件」變成「軟件」），講者用的詞不變，「台」也會保持「台」。在「設定 → 轉錄 → 中文輸出」可以改成台灣用語或不轉換；台灣用語會把大陸用詞換成台灣說法（「文件」變成「檔案」），可能改掉講者實際說的詞。詞庫和「專有名詞」裡的寫法不會被改。
 
 **疑難排解**：遇到問題時，請參考上方英文的 [Troubleshooting](#troubleshooting) 表格；回報問題時可附上 `%LOCALAPPDATA%\LocalScribe\localscribe.log`（記錄檔只有檔名與耗時，不含逐字稿內容；但未預期錯誤的技術細節可能含有檔案位置，分享前請先檢查）。

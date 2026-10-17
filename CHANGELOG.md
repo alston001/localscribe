@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Chinese in Traditional characters.** Whisper often writes Chinese in Simplified characters, also for speakers from Taiwan. Chinese transcripts are now converted to Traditional characters with [OpenCC](https://github.com/BYVoid/OpenCC) in every format, `_transcript.json` included. Only the script changes (软件 becomes 軟件, 处理 becomes 處理), so the words the speaker used stay. *Taiwan wording* under **Settings → Transcription → Chinese output** also swaps Mainland terms for Taiwan's (软件 becomes 軟體, 文件 becomes 檔案), which can change what was actually said; *As Whisper wrote it* keeps the text as it was. On the command line, use `--chinese`. Each word keeps its time and confidence; where a phrase changes length (代码 becomes 程式碼 with Taiwan wording), its words share the new text. Terms in the word bank and in Names and terms keep the spelling you gave them, and 台 stays 台 rather than OpenCC's formal 臺. Japanese is never converted.
+
+### 中文摘要
+
+- **中文改用繁體字**：Whisper 轉出的中文常是簡體字，台灣的說話人也一樣。現在中文逐字稿會用 OpenCC 轉成繁體，所有格式都一樣，包括 `_transcript.json`。預設只轉字（「软件」變成「軟件」），講者用的詞不變。在「設定 → 轉錄 → 中文輸出」可以改成台灣用語或不轉換；台灣用語會把大陸用詞換成台灣說法（「软件」變成「軟體」、「文件」變成「檔案」），可能改掉講者實際說的詞。命令列用 `--chinese`。每個字都保留原本的時間和信心值。詞庫和「專有名詞」裡的寫法不會被改，「台」也會保持「台」，不會變成 OpenCC 的正式寫法「臺」。日文不會被轉換。
+
 ## 0.1.4
 
 - **Updates without downloading everything again.** LocalScribe now checks for a new version when it starts, at most once a day, and offers it in a strip above the file list. **Update** downloads it in the background, and **Restart now** installs it and opens LocalScribe again. It waits while a transcription runs, and settings, word banks and models are kept. Usually only the files that changed are downloaded: between 0.1.0 and 0.1.3, 5 of the 5,145 files in the program folder changed, about 75 MB compressed, against 2.8 GB for the full installer. When bundled libraries such as PyTorch change, the full installer is downloaded instead. Each release now also has `LocalScribe-Update-x.y.z.exe`, which updates the version before it by double-click. The check reads one file from this repository's GitHub releases and sends none of your files or personal data (GitHub sees your IP address, as with any download, and the request names the LocalScribe version). Every download is checked against its SHA-256 when it arrives and again just before it runs. If an update fails, the version that was installed opens again and the same update can be retried. Turn the check off, or check by hand, under **Settings → General → Updates**. A copy from the portable ZIP opens the download page instead. Older versions don't check yet, so this one is installed by hand once; from 0.1.3, the small update installer is enough.

@@ -24,6 +24,7 @@ the components below, each under its own license.
 | CTranslate2, faster-whisper | MIT |
 | pyannote.audio | MIT |
 | sherpa-onnx | Apache-2.0 |
+| OpenCC (Simplified to Traditional Chinese, with its dictionaries) | Apache-2.0 |
 | ONNX Runtime | MIT |
 | Lightning, torchmetrics, huggingface_hub, tokenizers, safetensors, requests, OpenTelemetry | Apache-2.0 |
 | NumPy, SciPy, scikit-learn, pandas | BSD-3-Clause |

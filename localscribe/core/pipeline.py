@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Sequence, TypeVar
 
 from .. import __version__
+from . import chinese
 from . import device as dev
 from .align import DEFAULT_SPEAKER, assign_speakers, group_utterances, join_words, smooth_speakers
 from .asr import AsrResult, drop_sign_offs, lost_speech, text_gaps
@@ -44,6 +45,8 @@ class JobOptions:
     denoise: bool = False
     hotwords: str = ""
     speaker_prefix: str = "Speaker"
+    chinese_script: str = "tw"  # Chinese text: tw | tw_phrases | off (see core/chinese.py)
+    keep_terms: tuple[str, ...] = ()    # the word bank's and Names and terms', spelled as written
 
 
 @dataclass
@@ -247,6 +250,8 @@ class Engine:
             self.log(f"{path.name}: removed {heard - len(asr.words)} word(s) of invented sign-offs (\"Thank you.\")")
         if not asr.words:
             raise UserError("err_no_speech")
+        if asr.language == "zh":  # not Japanese: its kanji are no Simplified characters
+            asr.words = chinese.to_traditional(asr.words, opts.chinese_script, opts.keep_terms)
 
         turns: list[Turn] = []
         diarizer_name = "none"
@@ -291,6 +296,8 @@ class Engine:
             "compute_type": dev.compute_type(device),
             "diarizer": diarizer_name, "timings_s": {k: round(v, 1) for k, v in timings.items()},
         })
+        if asr.language == "zh":
+            transcript.settings["chinese_script"] = chinese.normalize_style(opts.chinese_script)
         self.log(f"{path.name}: {len(transcript.speakers)} speaker(s), "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in timings.items()))
         return transcript

@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from . import paths
+from .core import chinese
 from .core.diarization import SpeakerCount
 from .core.pipeline import EngineSettings, JobOptions
 from .export import FORMATS
@@ -41,6 +42,7 @@ class Settings:
     device: str = "auto"
     diarizer: str = "auto"
     hotwords: str = ""
+    chinese_script: str = "tw"  # Chinese text: tw | tw_phrases | off (core/chinese.py)
     vocabulary: str = ""           # chosen word bank's name; "" = none
     speaker_label: str = "Speaker"
     subtitle_speakers: bool = True
@@ -96,6 +98,7 @@ class Settings:
                 clean[f.name] = value
         settings = cls(**clean)
         settings.formats = [f for f in settings.formats if isinstance(f, str) and f in FORMATS]
+        settings.chinese_script = chinese.normalize_style(settings.chinese_script)
         if settings.preset not in PRESET_ORDER:
             settings.preset = "custom"
         if settings.preset in PRESETS:
@@ -129,12 +132,14 @@ class Settings:
                               whisper_model=self.whisper_model, device=self.device,
                               diarizer=self.diarizer)
 
-    def job_options(self, hotwords: str | None = None) -> JobOptions:
-        """`hotwords`: the word bank's terms combined with this field's (see vocabulary.prompt_terms)."""
+    def job_options(self, hotwords: str | None = None, keep_terms: list[str] | tuple[str, ...] = ()) -> JobOptions:
+        """`hotwords`: the word bank's terms combined with this field's (see vocabulary.prompt_terms).
+        `keep_terms`: all of those terms, which Chinese conversion leaves as written."""
         return JobOptions(language=None if self.language == "auto" else self.language,
                           speakers=self.speaker_count(), normalize=self.normalize, denoise=self.denoise,
                           hotwords=self.hotwords if hotwords is None else hotwords,
-                          speaker_prefix=self.speaker_label)
+                          speaker_prefix=self.speaker_label, chinese_script=self.chinese_script,
+                          keep_terms=tuple(keep_terms))
 
     def export_options(self, ui_language: str) -> ExportOptions:
         return ExportOptions(lang=ui_language, timestamps=self.timestamps,
