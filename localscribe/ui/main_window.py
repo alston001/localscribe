@@ -459,12 +459,15 @@ class MainWindow(QMainWindow):
         # Written by update checks while Settings was open, after the dialog took its copy.
         chosen.update_checked_at, chosen.last_version = self.settings.update_checked_at, self.settings.last_version
         language_changed = chosen.ui_language != self.settings.ui_language
+        theme_changed = chosen.theme != self.settings.theme
         self.settings = chosen
         self._save_settings()
         self.engine.update_settings(self.settings.engine_settings())
         if language_changed:
             i18n.set_language(self.settings.ui_language)
             self.retranslate()
+        if theme_changed:
+            style.apply(QApplication.instance(), self.settings.theme)
         self._update_status_bar()
 
     # --------------------------------------------------------------- updates

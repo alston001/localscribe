@@ -28,7 +28,7 @@ def _icon(kind: str) -> QIcon:
         pix.fill(Qt.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(QPen(QColor(style.MUTED), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.setPen(QPen(QColor(style.current.muted), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         if kind == "search":
             p.drawEllipse(QPointF(6.8, 6.8), 4.3, 4.3)
             p.drawLine(QPointF(10, 10), QPointF(13.5, 13.5))
@@ -76,9 +76,9 @@ class _RowDelegate(QStyledItemDelegate):
         painter.save()
         rect, name = option.rect, index.data(_NAME)
         if option.state & QStyle.State_Selected:
-            painter.fillRect(rect, QColor("#DBEAFE"))
+            painter.fillRect(rect, QColor(style.current.selection))
         elif option.state & QStyle.State_MouseOver:
-            painter.fillRect(rect, QColor(style.WINDOW))
+            painter.fillRect(rect, QColor(style.current.row_hover))
         # Measure and draw in the same font: on Windows, item views get 9 pt while the viewport
         # keeps the app's 10 pt, which cut the "1" off "16 term(s)".
         painter.setFont(option.font)
@@ -90,13 +90,13 @@ class _RowDelegate(QStyledItemDelegate):
             count = index.data(_COUNT)
             width = option.fontMetrics.horizontalAdvance(count)
             count_box = QRect(buttons["edit"].left() - 6 - width, rect.top(), width, rect.height())
-            painter.setPen(QColor(style.MUTED))
+            painter.setPen(QColor(style.current.muted))
             painter.drawText(count_box, Qt.AlignVCenter | Qt.AlignRight | Qt.TextDontClip, count)
             text.setRight(count_box.left() - 10)
         font = QFont(option.font)
         font.setBold(name.casefold() == self.current)
         painter.setFont(font)
-        painter.setPen(QColor(style.TEXT))
+        painter.setPen(QColor(style.current.text))
         label = QFontMetrics(font).elidedText(index.data(Qt.DisplayRole), Qt.ElideRight, text.width())
         painter.drawText(text, Qt.AlignVCenter | Qt.AlignLeft, label)
         painter.restore()
@@ -323,7 +323,7 @@ class VocabularyEditor(QDialog):
         self.lbl_count = QLabel(wordWrap=True)
         self.lbl_combined = QLabel(wordWrap=True)
         self.lbl_error = QLabel(wordWrap=True, textFormat=Qt.PlainText)  # it can quote a bank's name
-        self.lbl_error.setStyleSheet(f"color: {style.DANGER};")
+        self.lbl_error.setStyleSheet(f"color: {style.current.danger};")
         self.lbl_error.hide()
         for label in (self.lbl_count, self.lbl_combined, self.lbl_error):
             layout.addWidget(label)
@@ -378,4 +378,4 @@ class VocabularyEditor(QDialog):
 
 def _show_count(label: QLabel, text: str, over: bool) -> None:
     label.setText(text)
-    label.setStyleSheet(f"color: {style.DANGER if over else style.MUTED};")
+    label.setStyleSheet(f"color: {style.current.danger if over else style.current.muted};")

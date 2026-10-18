@@ -33,11 +33,13 @@ LANGUAGE_CHOICES = [("en", "English"), ("auto", None), ("zh", "中文"), ("ja", 
                     ("ko", "한국어"), ("es", "Español"), ("fr", "Français"), ("de", "Deutsch")]
 
 WHISPER_CHOICES = ["auto", "large-v3", "large-v3-turbo", "medium", "small", "base"]
+THEMES = ("system", "light", "dark")  # "system" follows Windows (ui/style.py)
 
 
 @dataclass
 class Settings:
     ui_language: str = ""          # "" = follow Windows on first start
+    theme: str = "system"          # system | light | dark
     whisper_model: str = "auto"
     device: str = "auto"
     diarizer: str = "auto"
@@ -99,6 +101,8 @@ class Settings:
         settings = cls(**clean)
         settings.formats = [f for f in settings.formats if isinstance(f, str) and f in FORMATS]
         settings.chinese_script = chinese.normalize_style(settings.chinese_script)
+        if settings.theme not in THEMES:
+            settings.theme = "system"
         if settings.preset not in PRESET_ORDER:
             settings.preset = "custom"
         if settings.preset in PRESETS:

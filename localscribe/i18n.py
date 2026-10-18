@@ -158,6 +158,13 @@ STRINGS: dict[str, tuple[str, str]] = {
     "hotwords_tip": ("幫助 Whisper 拼對人名、地名或術語，用逗號分隔（選填）",
                      "Helps Whisper spell names and jargon correctly; separate with commas (optional)"),
     "hotwords_placeholder": ("例如：Dr. Patel, NVivo, MATLAB", "e.g. Dr. Patel, NVivo, MATLAB"),
+    "theme": ("外觀", "Appearance"),
+    "theme_system": ("跟隨 Windows", "Follow Windows"),
+    "theme_light": ("淺色", "Light"),
+    "theme_dark": ("深色", "Dark"),
+    "theme_tip": ("深色模式讓背景變暗，光線暗時比較不刺眼。「跟隨 Windows」會照 Windows 的設定，Windows 切換時也跟著換。",
+                  "Dark mode darkens the background, which is easier on the eyes in dim light. Follow Windows uses "
+                  "Windows' own setting and switches when it does."),
     "zh_script": ("中文輸出", "Chinese output"),
     "zh_tw_phrases": ("繁體中文（台灣用語）", "Traditional Chinese, Taiwan wording"),
     "zh_tw": ("繁體中文（只轉字）", "Traditional Chinese, characters only"),

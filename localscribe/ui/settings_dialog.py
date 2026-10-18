@@ -12,10 +12,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__, i18n
-from ..config import WHISPER_CHOICES, Settings
+from ..config import THEMES, WHISPER_CHOICES, Settings
 from ..core import chinese
 from ..core.models import PYANNOTE_PAGE, ModelStore
 from ..i18n import tr
+from . import style
 from .threads import PyannoteDownload, UpdateCheck
 
 _TOKEN_PAGE = "https://huggingface.co/settings/tokens"
@@ -52,6 +53,10 @@ class SettingsDialog(QDialog):
         self.cmb_ui = QComboBox()
         _fill(self.cmb_ui, list(i18n.LANGUAGES.items()), self.settings.ui_language)
         form.addRow(tr("ui_language"), self.cmb_ui)
+        self.cmb_theme = QComboBox()
+        _fill(self.cmb_theme, [(theme, tr(f"theme_{theme}")) for theme in THEMES], self.settings.theme)
+        self.cmb_theme.setToolTip(tr("theme_tip"))
+        form.addRow(tr("theme"), self.cmb_theme)
         self.txt_label = QLineEdit(self.settings.speaker_label)
         self.txt_label.setToolTip(tr("speaker_label_tip"))
         form.addRow(tr("speaker_label"), self.txt_label)
@@ -148,7 +153,8 @@ class SettingsDialog(QDialog):
     def _refresh_pyannote_status(self) -> None:
         installed = self._store().pyannote_path() is not None
         self.lbl_pyannote.setText(tr("pyannote_installed" if installed else "pyannote_missing"))
-        self.lbl_pyannote.setStyleSheet(f"color: {'#15803D' if installed else '#B45309'}; font-weight: 600;")
+        color = style.current.success if installed else style.current.warning
+        self.lbl_pyannote.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.help_box.setVisible(not installed)
 
     def _download_pyannote(self) -> None:
@@ -172,7 +178,7 @@ class SettingsDialog(QDialog):
         self.btn_download.setEnabled(True)
         self.txt_token.setEnabled(True)
         self.lbl_download.setText(message)
-        self.lbl_download.setStyleSheet("" if ok else "color: #DC2626;")
+        self.lbl_download.setStyleSheet("" if ok else f"color: {style.current.danger};")
         if ok:
             self._refresh_pyannote_status()
 
@@ -221,6 +227,7 @@ class SettingsDialog(QDialog):
             return  # wait for the download to finish
         s = self.settings
         s.ui_language = self.cmb_ui.currentData()
+        s.theme = self.cmb_theme.currentData()
         s.update_check = self.chk_updates.isChecked()
         s.speaker_label = self.txt_label.text().strip() or "Speaker"
         s.subtitle_speakers = self.chk_sub_speakers.isChecked()

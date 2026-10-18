@@ -122,7 +122,6 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setWindowIcon(style.app_icon())
-    style.apply(app)
 
     bridge = _LogBridge()
     _setup_logging(bridge)
@@ -133,6 +132,7 @@ def main() -> int:
     if not settings.ui_language:
         settings.ui_language = i18n.default_language()
     i18n.set_language(settings.ui_language)
+    style.apply(app, settings.theme)
 
     from .main_window import MainWindow
 
