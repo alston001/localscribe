@@ -88,6 +88,12 @@ model = window.model
 out["loaded"] = window.player is not None and window.btn_play.isEnabled()
 out["rows"] = [[model.index(r, c).data() for c in range(3)] for r in range(model.rowCount())]
 out["unsure_tip"] = model.index(0, TEXT).data(Qt.ToolTipRole)
+from PySide6.QtGui import QColor, QPalette
+from localscribe.ui.proofread_window import unsure_colors
+dark = QPalette(app.palette())
+dark.setColor(QPalette.Base, QColor("#1F2937"))
+dark.setColor(QPalette.Text, QColor("#F3F4F6"))
+out["unsure_colors"] = [list(unsure_colors(app.palette())), list(unsure_colors(dark))]
 
 out["edit"] = model.setData(model.index(1, TEXT), "Thank you, Sam.")
 out["dirty_title"] = window.windowTitle().startswith("* ")
@@ -188,6 +194,8 @@ def test_the_proofreading_window(tmp_path):
     assert out["rows"] == [["00:00:00", "Speaker 1", "Hello, everyone."], ["00:00:01", "Speaker 2", "Thanks Sam."],
                            ["00:00:03", "Speaker 1", "Let's start."]]
     assert out["unsure_tip"] == "Words Whisper was unsure of: everyone."
+    # Yellow as in Word exports on a light background; on a dark one, light text on dark amber.
+    assert out["unsure_colors"] == [["#FEF08A", "#111827"], ["#854D0E", "#f3f4f6"]]
     assert out["edit"] and out["dirty_title"] and "edited" in out["edited_tip"]
     assert out["speakers_renamed"] == {"S1": "Prof. Lee", "S2": "Speaker 2"} and out["row0_speaker"] == "Prof. Lee"
     assert out["list"] == ["Prof. Lee", "Speaker 2"] and out["list_after_empty"] == ["Prof. Lee", "Speaker 2"]

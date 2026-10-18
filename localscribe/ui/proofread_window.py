@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRect, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut, QTextDocument
+from PySide6.QtGui import QFontMetrics, QKeySequence, QPalette, QShortcut, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
                                QLabel, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QSplitter, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableView,
@@ -32,13 +32,20 @@ from . import style
 log = logging.getLogger("localscribe")
 
 TIME, SPEAKER, TEXT = range(3)
-UNSURE_BACKGROUND = "#FEF08A"  # the yellow Word exports use for unsure words
 _MARGIN = 4  # around a segment's text
 # Roles as plain ints: Qt asks a long transcript's model hundreds of thousands of times while it
 # lays the rows out, and comparing Qt's enum objects made that take seconds.
 _DISPLAY, _EDIT, _TOOLTIP, _ALIGN = (int(r) for r in (Qt.DisplayRole, Qt.EditRole, Qt.ToolTipRole,
                                                        Qt.TextAlignmentRole))
 _TOP_LEFT = int(Qt.AlignLeft | Qt.AlignTop)
+
+
+def unsure_colors(palette: QPalette) -> tuple[str, str]:
+    """(background, text) for the words Whisper was unsure of: on a light background the yellow
+    Word exports use, on a dark one (dark mode) a dark amber that the light text reads on at 6:1."""
+    if palette.color(QPalette.Base).lightness() < 128:
+        return "#854D0E", palette.color(QPalette.Text).name()
+    return "#FEF08A", "#111827"
 
 
 class RecordingLoader(QThread):
@@ -161,10 +168,11 @@ class TextDelegate(QStyledItemDelegate):
 
     def _document(self, index: QModelIndex, option, width: int) -> QTextDocument:
         seg = self.t.segments[index.row()]
+        background, color = unsure_colors(option.palette)
         parts = []
         for text, unsure in marked_runs(seg, ExportOptions(mark_uncertain=True)):
             text = html.escape(text)
-            parts.append(f'<span style="background-color:{UNSURE_BACKGROUND}">{text}</span>' if unsure else text)
+            parts.append(f'<span style="background-color:{background}; color:{color}">{text}</span>' if unsure else text)
         doc = QTextDocument()
         doc.setDefaultFont(option.font)
         doc.setDocumentMargin(_MARGIN)
