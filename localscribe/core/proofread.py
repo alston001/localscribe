@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import bisect
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
 from ..export import FORMATS, output_base
 from ..export.common import ExportOptions
@@ -88,6 +90,57 @@ def drop_unused_speakers(t: Transcript) -> None:
     """Exports list every speaker, so one whose segments all went elsewhere is removed on saving."""
     for sid in unused_speakers(t):
         del t.speakers[sid]
+
+
+def matches_in(text: str, needle: str, match_case: bool = False) -> list[tuple[int, int]]:
+    """(start, end) of each place `needle` occurs in `text`, the text as typed (not a pattern);
+    upper and lower case match each other unless match_case."""
+    if not needle:
+        return []
+    return [m.span() for m in re.finditer(re.escape(needle), text, 0 if match_case else re.IGNORECASE)]
+
+
+def find(t: Transcript, needle: str, match_case: bool = False) -> list[tuple[int, int, int]]:
+    """Every match of `needle` in the segments' texts, in order, as (segment index, start, end)."""
+    return [(i, *span) for i, seg in enumerate(t.segments) for span in matches_in(seg.text, needle, match_case)]
+
+
+def replace_one(t: Transcript, index: int, start: int, end: int, replacement: str) -> int | None:
+    """Puts `replacement` in place of text[start:end] of segment `index`. Returns where the new text
+    goes on after it, which is where the next match is looked for, or None when nothing changed:
+    the text would be the same, or empty (deleting is delete_segment)."""
+    text = t.segments[index].text
+    before = text[:start] + replacement
+    if not set_text(t, index, before + text[end:]):
+        return None
+    return len(_clean(before))  # set_text tidies the spaces, but only spaces
+
+
+class Replaced(NamedTuple):
+    changed: list[tuple[int, str]]  # (segment index, its text before)
+    count: int  # the matches replaced
+    kept: int  # segments left as they were, since they would have no text
+
+
+def replace_all(t: Transcript, needle: str, replacement: str, match_case: bool = False) -> Replaced:
+    """Replaces every match of `needle` (see matches_in) with `replacement`, taken as it is typed."""
+    changed, count, kept = [], 0, 0
+    for i, seg in enumerate(t.segments):
+        old = seg.text
+        spans = matches_in(old, needle, match_case)
+        if not spans:
+            continue
+        pieces, last = [], 0
+        for start, end in spans:
+            pieces += [old[last:start], replacement]
+            last = end
+        new = "".join(pieces) + old[last:]
+        if set_text(t, i, new):
+            changed.append((i, old))
+            count += len(spans)
+        elif not new.strip():
+            kept += 1
+    return Replaced(changed, count, kept)
 
 
 def segment_at(t: Transcript, seconds: float) -> int | None:

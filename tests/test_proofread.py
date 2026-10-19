@@ -75,6 +75,35 @@ def test_deleting_a_segment_and_speakers_left_without_any():
     assert t.speakers == {"S1": "Speaker 1"}
 
 
+def test_finding_text_in_the_segments():
+    t = make_transcript()
+    assert proofread.find(t, "sam") == [(1, 7, 10)]  # upper and lower case alike, unless asked
+    assert proofread.find(t, "sam", match_case=True) == [] and proofread.find(t, "Sam", True) == [(1, 7, 10)]
+    assert proofread.find(t, ".") == [(0, 15, 16), (1, 10, 11), (2, 11, 12)]  # the text typed, not a pattern
+    assert proofread.find(t, "") == [] and proofread.matches_in("Sam, sam", "SAM") == [(0, 3), (5, 8)]
+
+
+def test_replacing_one_match_says_where_its_text_goes_on():
+    t = make_transcript()
+    assert proofread.replace_one(t, 1, 7, 10, "Sam and Pam") == 18  # the next match is looked for after it
+    assert t.segments[1].text == "Thanks Sam and Pam."
+    assert proofread.replace_one(t, 0, 0, 6, "") == 0 and t.segments[0].text == "everyone."  # spaces tidied
+    assert proofread.replace_one(t, 2, 0, 12, "") is None and t.segments[2].text == "Let's start."  # never empty
+    assert proofread.replace_one(t, 2, 0, 5, "Let's") is None  # nothing changed
+
+
+def test_replacing_every_match_at_once():
+    t = make_transcript()
+    t.segments += [Segment("S1", 4.0, 4.5, "Sam? SAM!"), Segment("S2", 5.0, 5.5, "sam")]
+    done = proofread.replace_all(t, "sam", "Pam")
+    assert [s.text for s in t.segments] == ["Hello, everyone.", "Thanks Pam.", "Let's start.", "Pam? Pam!", "Pam"]
+    assert done.changed == [(1, "Thanks Sam."), (3, "Sam? SAM!"), (4, "sam")] and done.count == 4 and done.kept == 0
+    done = proofread.replace_all(t, "Pam", "", match_case=True)
+    assert [s.text for s in t.segments[3:]] == ["? !", "Pam"]  # a segment is never left without text
+    assert done.changed == [(1, "Thanks Pam."), (3, "Pam? Pam!")] and done.count == 3 and done.kept == 1
+    assert proofread.replace_all(t, "thanks", r"\1 \n").count == 1 and t.segments[1].text == r"\1 \n ."
+
+
 def test_the_segment_playing_at_a_time():
     t = make_transcript()
     assert [proofread.segment_at(t, x) for x in (-1.0, 0.0, 1.0, 1.6, 2.9, 3.0, 50.0)] == [None, 0, 0, 1, 1, 2, 2]

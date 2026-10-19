@@ -247,6 +247,52 @@ for _ in range(2):  # the window scrolls to the audio itself, and that goes on f
 out["dclick_follows"] = followed
 scroller.close()
 
+# Find (Ctrl+F) and replace (Ctrl+H) in the texts; each replacement is undone like any edit.
+from PySide6.QtGui import QShortcut
+from localscribe.ui.proofread_window import highlight
+out["pieces"] = highlight([("Sam said ", False), ("hello", True), (" to Sam.", False)], [(0, 3), (18, 21)], (18, 21))
+out["pieces_over_unsure"] = highlight([("a ", False), ("bc", True), (" d", False)], [(3, 5)], None)
+Transcript(source="none.wav", duration=6.0, language="en", created="", app_version="0.1.5", settings={},
+           speakers={"S1": "A", "S2": "B"},
+           segments=[Segment("S1", 0.0, 1.0, "Sam said hello to Sam."), Segment("S2", 1.5, 2.5, "Then Pam left."),
+                     Segment("S1", 3.0, 4.0, "sam is here."), Segment("S2", 4.5, 5.0, "Nothing.")]
+           ).save(folder / "find_transcript.json")
+finder = ProofreadWindow(folder / "find_transcript.json", Settings())
+finder.show()
+app.processEvents()
+out["find_keys"] = sorted(s.key().toString() for s in finder.findChildren(QShortcut))
+QTest.keyClick(finder.table, Qt.Key_F, Qt.ControlModifier)
+out["find_shown"] = [finder.find_bar.isVisible(), finder.edit_replace.isVisible(), finder.edit_find.hasFocus()]
+QTest.keyClicks(finder.edit_find, "sam")  # found as it is typed
+out["first"] = [finder._match, finder.lbl_matches.text(), finder.table.currentIndex().row()]
+steps = []
+for modifier in (Qt.NoModifier, Qt.NoModifier, Qt.NoModifier, Qt.ShiftModifier):  # Enter, and Shift+Enter
+    QTest.keyClick(finder.edit_find, Qt.Key_Return, modifier)
+    steps.append(finder._match)
+out["steps"] = steps
+delegate = finder.table.itemDelegateForColumn(TEXT)
+out["delegate"] = [delegate.found, delegate.current]
+finder.chk_match_case.setChecked(True)
+out["match_case"] = [finder._match, finder.lbl_matches.text()]
+finder.chk_match_case.setChecked(False)
+QTest.keyClick(finder.edit_find, Qt.Key_H, Qt.ControlModifier)
+out["replace_shown"] = finder.edit_replace.isVisible()
+finder.edit_replace.setText("Pam")
+out["replace"] = [finder.replace(), finder.t.segments[2].text, finder._match, finder.dirty]
+finder.undo()
+out["replace_undone"] = [finder.t.segments[2].text, finder.dirty]
+out["replace_all"] = [finder.replace_all(), [s.text for s in finder.t.segments], finder.lbl_status.text(),
+                      finder.lbl_matches.text()]
+finder.undo()  # all of them in one step
+out["all_undone"] = [[s.text for s in finder.t.segments], finder.dirty]
+out["replace_finds_first"] = [finder.replace(), finder._match, finder.t.segments[0].text, finder.lbl_matches.text()]
+finder.edit_replace.setText("")
+finder.edit_find.setText("Nothing.")
+out["never_empty"] = [finder.replace(), finder.t.segments[3].text, "delete" in finder.lbl_status.text().lower()]
+QTest.keyClick(finder.edit_find, Qt.Key_Escape)
+out["find_hidden"] = [finder.find_bar.isVisible(), delegate.found, finder.table.hasFocus()]
+finder.close()
+
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
 segments = [Segment(f"S{1 + k % 3}", words[k * 10].start, words[k * 10 + 9].end,
@@ -288,6 +334,24 @@ def test_the_proofreading_window(tmp_path):
     assert out["click_stays"] == 2 and out["space_follows"] == 1  # picked while playing: kept until play again
     assert out["wheel_scrolled"] and out["scroll_stays"] == 0
     assert out["dclick_follows"] == [20, 40]  # 2 s is 20 segments on
+    assert out["pieces"] == [["Sam", "match"], [" said ", None], ["hello", "unsure"], [" to ", None],
+                             ["Sam", "current"], [".", None]]
+    assert out["pieces_over_unsure"] == [["a ", None], ["b", "unsure"], ["c ", "match"], ["d", None]]
+    assert {"Ctrl+F", "Ctrl+H", "F3", "Shift+F3"} <= set(out["find_keys"])
+    assert out["find_shown"] == [True, False, True]
+    assert out["first"] == [[0, 0, 3], "1 of 3", 0]
+    assert out["steps"] == [[0, 18, 21], [2, 0, 3], [0, 0, 3], [2, 0, 3]]  # around the end, both ways
+    assert out["delegate"] == [["sam", False], [2, 0, 3]]
+    assert out["match_case"] == [[2, 0, 3], "1 of 1"]
+    assert out["replace_shown"]
+    assert out["replace"] == [True, "Pam is here.", [0, 0, 3], True]  # and on to the next match
+    assert out["replace_undone"] == ["sam is here.", False]
+    assert out["replace_all"] == [3, ["Pam said hello to Pam.", "Then Pam left.", "Pam is here.", "Nothing."],
+                                  "Replaced: 3.", "No matches"]
+    assert out["all_undone"] == [["Sam said hello to Sam.", "Then Pam left.", "sam is here.", "Nothing."], False]
+    assert out["replace_finds_first"] == [False, [0, 0, 3], "Sam said hello to Sam.", "1 of 3"]  # shown, not replaced
+    assert out["never_empty"] == [False, "Nothing.", True]
+    assert out["find_hidden"] == [False, None, True]
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
     assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
     assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]
