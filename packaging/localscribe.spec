@@ -54,10 +54,11 @@ a = Analysis(
 )
 a.datas, a.binaries = ([entry for entry in toc if not entry[0].replace("\\", "/").startswith(_OPENCC_BUILD_ONLY)]
                        for toc in (a.datas, a.binaries))  # its .exe tools count as binaries
-# sounddevice's hook brings every PortAudio build it ships: 32-bit, ARM, macOS and ASIO ones too. It
-# loads libportaudio64bit.dll unless SD_ENABLE_ASIO is set, and the ASIO SDK has a license of its own.
-a.binaries = [entry for entry in a.binaries if "portaudio-binaries" not in entry[0].replace("\\", "/")
-              or Path(entry[0]).name == "libportaudio64bit.dll"]
+# sounddevice's hook brings every PortAudio build it ships: 32-bit, ARM, macOS and ASIO ones too, the
+# macOS one and a README as data. It loads libportaudio64bit.dll unless SD_ENABLE_ASIO is set, and the
+# ASIO SDK has a license of its own.
+a.binaries, a.datas = ([entry for entry in toc if "portaudio-binaries" not in entry[0].replace("\\", "/")
+                        or Path(entry[0]).name == "libportaudio64bit.dll"] for toc in (a.binaries, a.datas))
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,

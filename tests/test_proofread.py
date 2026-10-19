@@ -255,6 +255,7 @@ def test_the_bundle_takes_sounddevice_with_one_portaudio_library():
     root = Path(__file__).resolve().parent.parent
     spec = (root / "packaging" / "localscribe.spec").read_text(encoding="utf-8")
     assert 'Path(entry[0]).name == "libportaudio64bit.dll"' in spec  # not the ASIO or other builds
+    assert "for toc in (a.binaries, a.datas)" in spec  # the macOS one and its README come as data
     assert any(line.startswith("sounddevice==") for line in (root / "requirements.txt").read_text().splitlines())
 
 
