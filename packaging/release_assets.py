@@ -7,8 +7,9 @@ Run from PowerShell after build.ps1 and the full installer (README: Building the
 It writes into dist\\; attach all of them to the GitHub release:
     LocalScribe-<v>-files.json   every file of the bundle with its size and SHA-256; the next
                                  release builds its update installer against it
-    LocalScribe-Update-<v>.exe   only the files that changed since the previous release, for the
-                                 older versions whose other files are all the same
+    LocalScribe-Update-<v>.exe   the files that changed since the previous release, for the older
+                                 versions whose other files are the same; one that lacks a few
+                                 files besides (MAX_EXTRA_BYTES) gets those in it too
     latest.json                  what LocalScribe reads to offer the update (core/update.py)
 """
 
