@@ -30,6 +30,7 @@ from ..vocabulary import (PROMPT_LIMIT, TokenCounter, Vocabulary, find_vocabular
 from . import style
 from .convert_dialog import ConvertDialog
 from .jobs import JobTableModel, QueueView
+from .proofread_window import ProofreadWindow
 from .settings_dialog import SettingsDialog, _fill
 from .threads import DeviceProbe, DurationProbe, ProcessThread, Task, UpdateCheck
 from .update_bar import UpdateBar
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self._pending_installer: Path | None = None  # started once the window has closed
         self._update_check = None  # the check at start (threads.UpdateCheck)
         self.vocabularies: list[Vocabulary] = []
+        self._proofreaders: list[ProofreadWindow] = []  # the open proofreading windows
         self._reload_vocabularies()
         self.model = JobTableModel(self)
         self._build()
@@ -87,6 +89,7 @@ class MainWindow(QMainWindow):
         self.btn_remove = QPushButton(clicked=self.remove_selected)
         self.btn_clear = QPushButton(clicked=self.clear_finished)
         self.btn_convert = QPushButton(clicked=self.open_converter)
+        self.btn_proofread = QPushButton(clicked=self.open_proofread_dialog)
         self.btn_log = QPushButton(checkable=True)
         self.btn_log.toggled.connect(lambda on: self.log_view.setVisible(on))
         self.btn_settings = QPushButton(clicked=self.open_settings)
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
             bar.addWidget(b)
         bar.addSpacing(12)
         bar.addWidget(self.btn_convert)
+        bar.addWidget(self.btn_proofread)
         bar.addStretch(1)
         bar.addWidget(self.btn_log)
         bar.addWidget(self.btn_settings)
@@ -267,6 +271,8 @@ class MainWindow(QMainWindow):
         self.btn_remove.setText(tr("remove"))
         self.btn_clear.setText(tr("clear_finished"))
         self.btn_convert.setText(tr("convert"))
+        self.btn_proofread.setText(tr("proofread"))
+        self.btn_proofread.setToolTip(tr("proofread_tip"))
         self.btn_log.setText(tr("show_log"))
         self.btn_settings.setText(tr("settings"))
         self.grp_options.setTitle(tr("options"))
@@ -774,6 +780,9 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         if job.outputs:
             menu.addAction(tr("open_transcript"), lambda: self._open_transcript(job))
+            transcript = next((p for p in job.outputs if p.endswith(".json")), None)
+            if transcript:
+                menu.addAction(tr("proofread_menu"), lambda: self.open_proofread(Path(transcript), job.path))
             menu.addAction(tr("open_folder"), lambda: self._open_folder(job))
         if job.status == "failed":
             menu.addAction(tr("show_error"), lambda: self._show_error(job))
@@ -792,6 +801,34 @@ class MainWindow(QMainWindow):
         documents = [p for p in job.outputs if not p.endswith(".json")] or job.outputs
         if documents:
             QDesktopServices.openUrl(QUrl.fromLocalFile(documents[0]))
+
+    def open_proofread_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, tr("proofread_open_title"), "",
+                                              f"{tr('proofread_filter')} (*_transcript*.json)")
+        if path:
+            self.open_proofread(Path(path))
+
+    def open_proofread(self, json_path: Path, recording: Path | None = None) -> ProofreadWindow | None:
+        key = Path(json_path).resolve()
+        window = next((w for w in self._proofreaders if w.json_path.resolve() == key), None)  # Save As moves one
+        if window is None:
+            try:
+                window = ProofreadWindow(json_path, self.settings, recording)
+            except UserError as exc:
+                QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
+                return None
+            except Exception:  # damaged, or some other program's JSON
+                log.warning("Could not open %s for proofreading", Path(json_path).name, exc_info=True)
+                QMessageBox.warning(self, APP_NAME, tr("err_not_transcript", path=str(json_path)))
+                return None
+            self._proofreaders.append(window)
+            # Forgotten once Qt has deleted it: dropping the last reference while it closes would
+            # delete it under Qt's feet.
+            window.destroyed.connect(lambda: self._proofreaders.remove(window))
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return window
 
     def _open_folder(self, job) -> None:
         target = job.outputs[0] if job.outputs else str(job.path)
@@ -812,6 +849,10 @@ class MainWindow(QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
+        for window in list(self._proofreaders):  # each asks about its unsaved changes
+            if not window.close():
+                event.ignore()
+                return
         installer, self._pending_installer = self._pending_installer, None  # for this close only
         if self.worker is not None and not self._closing:
             answer = QMessageBox.question(self, APP_NAME, tr("confirm_quit"))

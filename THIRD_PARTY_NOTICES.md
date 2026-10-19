@@ -25,6 +25,9 @@ the components below, each under its own license.
 | pyannote.audio | MIT |
 | sherpa-onnx | Apache-2.0 |
 | OpenCC (Simplified to Traditional Chinese, with its dictionaries) | Apache-2.0 |
+| python-sounddevice, with the PortAudio library it ships (playback while proofreading) | MIT / PortAudio license (MIT-style) |
+| CFFI | MIT-0 |
+| pycparser | BSD-3-Clause |
 | ONNX Runtime | MIT |
 | Lightning, torchmetrics, huggingface_hub, tokenizers, safetensors, requests, OpenTelemetry | Apache-2.0 |
 | NumPy, SciPy, scikit-learn, pandas | BSD-3-Clause |
