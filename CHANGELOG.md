@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Dark mode.** **Settings → General → Appearance** offers *Follow Windows* (the default), *Light* and *Dark*. Following Windows, LocalScribe switches as soon as Windows does; the windows' title bars follow too. Every text color in both themes reads at 4.5:1 or more against its background, the contrast WCAG AA asks for; to get there, the light theme's hint text is a shade darker.
+
+### 中文摘要
+
+- **深色模式**：「設定 → 一般 → 外觀」可以選「跟隨 Windows」（預設）、「淺色」或「深色」。跟隨 Windows 時，Windows 一切換，LocalScribe 也立刻跟著換，視窗的標題列也一樣。兩種配色的文字和背景對比都在 4.5:1 以上，符合 WCAG AA 的建議；為此淺色配色的提示文字稍微加深了一點。
+
 ## 0.1.5
 
 - **Chinese in Traditional characters.** Whisper often writes Chinese in Simplified characters, also for speakers from Taiwan. Chinese transcripts are now converted to Traditional characters with [OpenCC](https://github.com/BYVoid/OpenCC) in every format, `_transcript.json` included. Only the script changes (软件 becomes 軟件, 处理 becomes 處理), so the words the speaker used stay. *Taiwan wording* under **Settings → Transcription → Chinese output** also swaps Mainland terms for Taiwan's (软件 becomes 軟體, 文件 becomes 檔案), which can change what was actually said; *As Whisper wrote it* keeps the text as it was. On the command line, use `--chinese`. Each word keeps its time and confidence; where a phrase changes length (代码 becomes 程式碼 with Taiwan wording), its words share the new text. Terms in the word bank and in Names and terms keep the spelling you gave them, and 台 stays 台 rather than OpenCC's formal 臺. Japanese is never converted.

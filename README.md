@@ -94,6 +94,7 @@ Settings dialog:
 | Option | What it does |
 |---|---|
 | Interface language | English or Traditional Chinese |
+| Appearance | *Follow Windows* (the default) uses Windows' light or dark mode and switches when Windows does; *Light* or *Dark* stays put |
 | Speaker label | The word used in transcripts, e.g. "Speaker" gives Speaker 1, Speaker 2 |
 | Model | *Automatic* picks large-v3 on a GPU and small on a CPU. large-v3-turbo is much faster with slightly lower accuracy |
 | Device | *Automatic*, NVIDIA GPU or CPU. If the GPU fails, Automatic switches to the CPU by itself |
@@ -261,7 +262,7 @@ LocalScribe 是 Windows 上的本機逐字稿工具，可以把錄音或影片�
 
 **更新**：從 0.1.4 起，LocalScribe 開啟時會檢查有沒有新版本，每天最多一次。有新版本時，檔案清單上方會出現提示：按「更新」在背景下載，下載好後按「立即重新啟動」就會安裝並自動重開。轉錄進行中會等完成；設定、詞庫和模型都會保留。通常只下載有變動的檔案，是約 75 MB 的小更新檔；內建的 PyTorch 等大型套件改版時，才會下載完整安裝檔。檢查時只會從本專案的 GitHub Releases 讀取一個版本資訊檔，不會傳送你的檔案或個人資料；GitHub 只看得到任何下載都有的資訊，例如 IP 位址和 LocalScribe 的版本。更新檔下載時和執行前都會核對 SHA-256。以系統管理員身分執行時，LocalScribe 不會自行安裝更新，而是開啟下載頁面。可以在「設定 → 一般 → 更新」關閉自動檢查，或按「立即檢查」。ZIP 免安裝版會改成開啟下載頁面。每個版本也會附上 `LocalScribe-Update-x.y.z.exe`，在前一版上雙擊就能更新。
 
-**使用**：把檔案拖進視窗，選好情境、語言和輸出格式，按「開始轉換」。第一次轉換會自動下載 Whisper 模型（有顯示卡約 3 GB，沒有約 480 MB），之後就完全離線。完成後雙擊該列可開啟逐字稿。要改成中文介面，請到「Settings → Interface language」選「繁體中文」。
+**使用**：把檔案拖進視窗，選好情境、語言和輸出格式，按「開始轉換」。第一次轉換會自動下載 Whisper 模型（有顯示卡約 3 GB，沒有約 480 MB），之後就完全離線。完成後雙擊該列可開啟逐字稿。要改成中文介面，請到「Settings → Interface language」選「繁體中文」。「設定 → 一般 → 外觀」可以選深色模式；預設跟隨 Windows 的淺色或深色設定。
 
 **情境**：一對一訪談（固定 2 人）、小組會議（2–10 人）、演講課堂（自動判斷人數）、線上會議（自動判斷人數，含降噪）。知道確切人數時，直接指定人數，分辨說話人的效果最好；但不要把上限設得比實際人數少，否則同一個人可能被拆成兩位。
 

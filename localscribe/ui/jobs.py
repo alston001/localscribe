@@ -87,8 +87,9 @@ class JobTableModel(QAbstractTableModel):
                 return "\n".join(job.warnings)
         if role == Qt.ForegroundRole and col == 2:
             key = "stopped" if job.status == "done" and job.warnings else job.status
-            if key in style.STATUS_COLORS:
-                return QColor(style.STATUS_COLORS[key])
+            colors = style.current.status_colors
+            if key in colors:
+                return QColor(colors[key])
         if role == Qt.TextAlignmentRole and col == 1:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.UserRole:
@@ -145,7 +146,7 @@ class ProgressDelegate(QStyledItemDelegate):
         bar.textVisible = True
         bar.state = QStyle.State_Enabled | QStyle.State_Horizontal
         bar.palette = option.palette
-        color = style.STATUS_COLORS.get(job.status, style.ACCENT)
+        color = style.current.status_colors.get(job.status, style.current.accent)
         bar.palette.setColor(bar.palette.ColorRole.Highlight, QColor(color))
         QApplication.style().drawControl(QStyle.CE_ProgressBar, bar, painter)
 
@@ -183,7 +184,7 @@ class QueueView(QTableView):
         super().paintEvent(event)
         if self.model() is not None and self.model().rowCount() == 0:
             painter = QPainter(self.viewport())
-            painter.setPen(QColor(style.MUTED))
+            painter.setPen(QColor(style.current.muted))
             font = painter.font()
             font.setPointSize(12)
             painter.setFont(font)
