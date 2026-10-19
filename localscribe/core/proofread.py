@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import bisect
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
-from ..export import FORMATS
+from ..export import FORMATS, output_base
 from ..export.common import ExportOptions
 from .errors import UserError
-from .transcript import Transcript
+from .transcript import Segment, Transcript
 
 # An export saved this many seconds or more after its transcript was changed since, probably by
 # hand, so the window asks before writing over it.
@@ -39,6 +41,35 @@ def set_text(t: Transcript, index: int, text: str) -> bool:
 
 def delete_segment(t: Transcript, index: int) -> None:
     del t.segments[index]
+
+
+def can_split(before: str, after: str) -> bool:
+    return bool(_clean(before) and _clean(after))
+
+
+def split_segment(t: Transcript, index: int, before: str, after: str) -> Segment | None:
+    """Splits segment `index` where another speaker begins: it keeps the text `before` (the cursor)
+    and a new segment `index + 1` of the same speaker gets `after`, with the words of each. They
+    meet between the two words nearest the split, in proportion when the text was edited, or by
+    the length of the text when no words tell. The new segment, or None when a side has no text."""
+    if not can_split(before, after):
+        return None
+    seg = t.segments[index]
+    first, second = _clean(before), _clean(after)
+    share = len(first) / len(_clean(before + after))
+    words = seg.words
+    if len(words) >= 2:
+        lengths = [len(_clean("".join(w.text for w in words[:k]))) for k in range(len(words) + 1)]
+        k = min(range(1, len(words)), key=lambda k: abs(lengths[k] - share * lengths[-1]))
+        start = min(max(words[k].start, seg.start), seg.end)
+        end = min(max(words[k - 1].end, seg.start), start)
+    else:
+        start = end = seg.start + (seg.end - seg.start) * share
+        k = sum(1 for w in words if w.end <= start)
+    new = Segment(seg.speaker, start, seg.end, second, words[k:])
+    seg.text, seg.end, seg.words = first, end, words[:k]
+    t.segments.insert(index + 1, new)
+    return new
 
 
 def set_speaker(t: Transcript, index: int, speaker_id: str) -> bool:
@@ -90,6 +121,57 @@ def drop_unused_speakers(t: Transcript) -> None:
         del t.speakers[sid]
 
 
+def matches_in(text: str, needle: str, match_case: bool = False) -> list[tuple[int, int]]:
+    """(start, end) of each place `needle` occurs in `text`, the text as typed (not a pattern);
+    upper and lower case match each other unless match_case."""
+    if not needle:
+        return []
+    return [m.span() for m in re.finditer(re.escape(needle), text, 0 if match_case else re.IGNORECASE)]
+
+
+def find(t: Transcript, needle: str, match_case: bool = False) -> list[tuple[int, int, int]]:
+    """Every match of `needle` in the segments' texts, in order, as (segment index, start, end)."""
+    return [(i, *span) for i, seg in enumerate(t.segments) for span in matches_in(seg.text, needle, match_case)]
+
+
+def replace_one(t: Transcript, index: int, start: int, end: int, replacement: str) -> int | None:
+    """Puts `replacement` in place of text[start:end] of segment `index`. Returns where the new text
+    goes on after it, which is where the next match is looked for, or None when nothing changed:
+    the text would be the same, or empty (deleting is delete_segment)."""
+    text = t.segments[index].text
+    before = text[:start] + replacement
+    if not set_text(t, index, before + text[end:]):
+        return None
+    return len(_clean(before))  # set_text tidies the spaces, but only spaces
+
+
+class Replaced(NamedTuple):
+    changed: list[tuple[int, str]]  # (segment index, its text before)
+    count: int  # the matches replaced
+    kept: int  # segments left as they were, since they would have no text
+
+
+def replace_all(t: Transcript, needle: str, replacement: str, match_case: bool = False) -> Replaced:
+    """Replaces every match of `needle` (see matches_in) with `replacement`, taken as it is typed."""
+    changed, count, kept = [], 0, 0
+    for i, seg in enumerate(t.segments):
+        old = seg.text
+        spans = matches_in(old, needle, match_case)
+        if not spans:
+            continue
+        pieces, last = [], 0
+        for start, end in spans:
+            pieces += [old[last:start], replacement]
+            last = end
+        new = "".join(pieces) + old[last:]
+        if set_text(t, i, new):
+            changed.append((i, old))
+            count += len(spans)
+        elif not new.strip():
+            kept += 1
+    return Replaced(changed, count, kept)
+
+
 def segment_at(t: Transcript, seconds: float) -> int | None:
     """The segment heard at `seconds`: the last one that has started by then."""
     i = bisect.bisect_right([seg.start for seg in t.segments], seconds) - 1
@@ -126,6 +208,35 @@ def changed_since(json_path: Path) -> list[Path]:
     return [path for path in outputs_of(json_path).values() if path.stat().st_mtime > saved + _CHANGED_AFTER]
 
 
+def transcript_path(path: Path) -> Path:
+    """The file Save As writes for a name typed as `path`: a '<name>_transcript.json', as
+    LocalScribe names transcripts and the Proofread… dialog lists them."""
+    path = Path(path)
+    stem = path.name[:-len(".json")] if path.name.lower().endswith(".json") else path.name
+    if "_transcript" not in stem.lower():
+        stem += "_transcript"
+    return path.with_name(stem + ".json")
+
+
+def save_as_name(json_path: Path) -> Path:
+    """What Save As suggests for a copy of `json_path`: next to it, numbered as another run of the
+    same recording would be ('class_transcript (2).json'), so it replaces nothing."""
+    json_path = Path(json_path)
+    cut = json_path.stem.lower().rfind("_transcript")
+    stem = json_path.stem[:cut] if cut >= 0 else json_path.stem
+    return json_path.with_name(output_base(json_path.parent, stem, list(outputs_of(json_path))) + ".json")
+
+
+def _formats_as(json_path: Path, new_path: Path) -> dict[str, Path]:
+    new_path = Path(new_path)
+    return {fmt: new_path.with_name(new_path.stem + FORMATS[fmt][0]) for fmt in outputs_of(json_path)}
+
+
+def save_as_files(json_path: Path, new_path: Path) -> list[Path]:
+    """The files save_as writes: `json_path`'s formats under the new name, then the transcript."""
+    return [*_formats_as(json_path, new_path).values(), Path(new_path)]
+
+
 def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
     """Writes `t` over `json_path` and its formats (outputs_of) again, so the files from its run
     say what the proofread transcript says; returns them. Everything is written to a staging
@@ -133,9 +244,18 @@ def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
     locks a document it shows). The transcript goes last, so the exports are never newer.
     Speakers left without segments are not written; `t` itself keeps them."""
     json_path = Path(json_path)
+    return _write(t, json_path, outputs_of(json_path), options)
+
+
+def save_as(t: Transcript, json_path: Path, new_path: Path, options: ExportOptions) -> list[Path]:
+    """Writes `t` as `new_path`, in the formats saved next to `json_path`, the way save does
+    (save_as_files); the files at `json_path` stay as they were."""
+    return _write(t, Path(new_path), _formats_as(json_path, new_path), options)
+
+
+def _write(t: Transcript, json_path: Path, targets: dict[str, Path], options: ExportOptions) -> list[Path]:
     used = {seg.speaker for seg in t.segments}
     t = replace(t, speakers={sid: name for sid, name in t.speakers.items() if sid in used})
-    targets = outputs_of(json_path)
     for path in [*targets.values(), json_path]:
         if path.exists():
             try:
@@ -143,7 +263,10 @@ def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
                     pass
             except PermissionError as exc:
                 raise UserError("err_file_in_use", path=str(path)) from exc
-    staging = Path(tempfile.mkdtemp(prefix=".localscribe-", dir=json_path.parent))
+    try:
+        staging = Path(tempfile.mkdtemp(prefix=".localscribe-", dir=json_path.parent))
+    except OSError as exc:  # a folder this user may not write to
+        raise UserError("err_write", path=str(json_path)) from exc
     try:
         for fmt, path in targets.items():
             FORMATS[fmt][1](t, staging / path.name, options)
