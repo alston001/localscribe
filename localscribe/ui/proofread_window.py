@@ -219,7 +219,7 @@ class TextEditor(QTextEdit):
         super().__init__(parent)
         self.setAcceptRichText(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setStyleSheet(f"QTextEdit {{ border: 1px solid {style.ACCENT}; }}")
+        self.setStyleSheet(f"QTextEdit {{ border: 1px solid {style.current.accent}; }}")  # the theme in use
         self.ensurePolished()
         self.document().setDocumentMargin(_MARGIN)
         self._cell = QRect()
