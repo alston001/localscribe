@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self._pending_installer: Path | None = None  # started once the window has closed
         self._update_check = None  # the check at start (threads.UpdateCheck)
         self.vocabularies: list[Vocabulary] = []
-        self._proofreaders: dict[Path, ProofreadWindow] = {}  # open proofreading windows by transcript
+        self._proofreaders: list[ProofreadWindow] = []  # the open proofreading windows
         self._reload_vocabularies()
         self.model = JobTableModel(self)
         self._build()
@@ -807,7 +807,7 @@ class MainWindow(QMainWindow):
 
     def open_proofread(self, json_path: Path, recording: Path | None = None) -> ProofreadWindow | None:
         key = Path(json_path).resolve()
-        window = self._proofreaders.get(key)
+        window = next((w for w in self._proofreaders if w.json_path.resolve() == key), None)  # Save As moves one
         if window is None:
             try:
                 window = ProofreadWindow(json_path, self.settings, recording)
@@ -818,8 +818,8 @@ class MainWindow(QMainWindow):
                 log.warning("Could not open %s for proofreading", Path(json_path).name, exc_info=True)
                 QMessageBox.warning(self, APP_NAME, tr("err_not_transcript", path=str(json_path)))
                 return None
-            self._proofreaders[key] = window
-            window.closed.connect(lambda _: self._proofreaders.pop(key, None))
+            self._proofreaders.append(window)
+            window.closed.connect(self._proofreaders.remove)
         window.show()
         window.raise_()
         window.activateWindow()
@@ -844,7 +844,7 @@ class MainWindow(QMainWindow):
                 pass
 
     def closeEvent(self, event) -> None:
-        for window in list(self._proofreaders.values()):  # each asks about its unsaved changes
+        for window in list(self._proofreaders):  # each asks about its unsaved changes
             if not window.close():
                 event.ignore()
                 return

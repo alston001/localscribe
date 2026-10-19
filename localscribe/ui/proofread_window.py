@@ -213,7 +213,7 @@ class SegmentTable(QTableView):
 
 
 class ProofreadWindow(QMainWindow):
-    closed = Signal(object)  # the transcript's path
+    closed = Signal(object)  # this window, once it has closed
 
     def __init__(self, json_path: Path, settings: Settings, recording: Path | None = None, parent=None):
         super().__init__(parent)
@@ -252,12 +252,15 @@ class ProofreadWindow(QMainWindow):
         self.btn_find.setVisible(self.recording is None)
         self.btn_undo = QPushButton(tr("pr_undo"), clicked=self.undo, enabled=False)
         self.btn_undo.setToolTip(QKeySequence(QKeySequence.Undo).toString(QKeySequence.NativeText))
+        self.btn_save_as = QPushButton(tr("pr_save_as"), clicked=self.save_as)
+        self.btn_save_as.setToolTip(tr("pr_save_as_tip"))
         self.btn_save = QPushButton(tr("pr_save"), objectName="primary", clicked=self.save)
         bar.addWidget(self.btn_play)
         bar.addWidget(self.lbl_time)
         bar.addWidget(self.btn_find)
         bar.addStretch(1)
         bar.addWidget(self.btn_undo)
+        bar.addWidget(self.btn_save_as)
         bar.addWidget(self.btn_save)
         root.addLayout(bar)
 
@@ -316,6 +319,7 @@ class ProofreadWindow(QMainWindow):
         self.statusBar().addWidget(self.lbl_status, 1)
 
         QShortcut(QKeySequence.Save, self, activated=self.save)
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self, activated=self.save_as)  # Qt has no Save As key on Windows
         QShortcut(QKeySequence.Undo, self, activated=self.undo)  # an open editor undoes its own typing first
         self.timer = QTimer(self, interval=100)
         self.timer.timeout.connect(self._tick)
@@ -573,10 +577,41 @@ class ProofreadWindow(QMainWindow):
         except UserError as exc:
             QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
             return False
+        self._saved(tr("pr_saved", n=len(written)))
+        return True
+
+    def save_as(self) -> bool:
+        """Writes the transcript and its run's formats under a new name, keeping the files it came
+        from; the window then works on the new ones."""
+        path, _ = QFileDialog.getSaveFileName(self, tr("pr_save_as_title"), str(proofread.save_as_name(self.json_path)),
+                                              f"{tr('proofread_filter')} (*_transcript*.json)",
+                                              options=QFileDialog.DontConfirmOverwrite)  # asked below, for every file
+        if not path:
+            return False
+        target = proofread.transcript_path(Path(path))
+        if target.resolve() == self.json_path.resolve():
+            return self.save()
+        if any(w is not self and w.isVisible() and w.json_path.resolve() == target.resolve()
+               for w in QApplication.topLevelWidgets() if isinstance(w, ProofreadWindow)):
+            QMessageBox.warning(self, APP_NAME, tr("pr_open_elsewhere", name=target.name))
+            return False
+        existing = [p for p in proofread.save_as_files(self.json_path, target) if p.exists()]
+        if existing and QMessageBox.question(self, APP_NAME, tr("pr_replace_files", files="\n".join(
+                p.name for p in existing))) != QMessageBox.Yes:
+            return False
+        try:
+            written = proofread.save_as(self.t, self.json_path, target, self.export_options())
+        except UserError as exc:
+            QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
+            return False
+        self.json_path = target
+        self._saved(tr("pr_saved_as", n=len(written), name=target.name))
+        return True
+
+    def _saved(self, message: str) -> None:
         self._saved_depth = len(self._undo)
         self._update_dirty()
-        self.lbl_status.setText(tr("pr_saved", n=len(written)))
-        return True
+        self.lbl_status.setText(message)
 
     def closeEvent(self, event) -> None:
         if self.dirty:
@@ -593,5 +628,5 @@ class ProofreadWindow(QMainWindow):
         if self._loader is not None and not self._loader.wait(15000):  # a running QThread must not be destroyed
             event.ignore()
             return
-        self.closed.emit(self.json_path)
+        self.closed.emit(self)
         super().closeEvent(event)

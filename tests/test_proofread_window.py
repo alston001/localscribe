@@ -44,7 +44,7 @@ sd.OutputStream, sd.CallbackStop = Stream, CallbackStop
 sys.modules["sounddevice"] = sd
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 app = QApplication([])
 from localscribe import i18n
 i18n.set_language("en")
@@ -156,13 +156,41 @@ out["discarded"] = Transcript.load(json_path).segments[0].text
 # Opening from the main window: the same transcript twice gives the same window; a stray JSON a message.
 warnings = []
 QMessageBox.warning = lambda *args: warnings.append(args[2])
-fake = types.SimpleNamespace(_proofreaders={}, settings=Settings())
+fake = types.SimpleNamespace(_proofreaders=[], settings=Settings())
 first = MainWindow.open_proofread(fake, json_path)
 out["reused"] = MainWindow.open_proofread(fake, json_path) is first and len(fake._proofreaders) == 1
 (folder / "other.json").write_text('{"name": "not a transcript"}', encoding="utf-8")
 out["stray"] = MainWindow.open_proofread(fake, folder / "other.json") is None and len(warnings) == 1
 first.close()
-out["forgotten"] = fake._proofreaders == {}
+out["forgotten"] = fake._proofreaders == []
+
+# Save As: new files under the name typed; the window goes on with those, and the old ones stay.
+originals = {p.name: p.read_bytes() for p in folder.glob("class_transcript*")}
+suggested = []
+QFileDialog.getSaveFileName = lambda *args, **kwargs: (suggested.append(Path(args[2]).name) or str(folder / "checked"), "")
+copy = MainWindow.open_proofread(fake, json_path)
+copy.model.setData(copy.model.index(0, TEXT), "Hello, all.")
+out["save_as"] = copy.save_as()
+out["save_as_suggested"] = suggested
+out["save_as_files"] = sorted(p.name for p in folder.glob("checked_transcript*"))
+out["save_as_text"] = Transcript.load(folder / "checked_transcript.json").segments[0].text
+out["save_as_clean"] = not copy.dirty and copy.windowTitle().startswith("Proofread: checked_transcript.json")
+copy.model.setData(copy.model.index(0, TEXT), "Hello, you all.")
+out["then_save"] = copy.save() and Transcript.load(folder / "checked_transcript.json").segments[0].text
+out["originals_kept"] = {p.name: p.read_bytes() for p in folder.glob("class_transcript*")} == originals
+out["by_new_name"] = MainWindow.open_proofread(fake, folder / "checked_transcript.json") is copy
+again = MainWindow.open_proofread(fake, json_path)
+out["by_old_name"] = again is not copy and again.t.segments[0].text == "Hello, everyone."
+QFileDialog.getSaveFileName = lambda *args, **kwargs: (str(folder / "checked_transcript.json"), "")
+out["refused_while_open"] = not again.save_as() and "another proofreading window" in warnings[-1]
+copy.close()
+questions = []
+QMessageBox.question = lambda *args, **kwargs: questions.append(args[2]) or QMessageBox.No
+out["asked_first"] = not again.save_as() and ["checked_transcript.txt" in q and "checked_transcript.json" in q
+                                              for q in questions] == [True]
+out["kept_when_no"] = Transcript.load(folder / "checked_transcript.json").segments[0].text == "Hello, you all."
+again.close()
+out["all_forgotten"] = fake._proofreaders == []
 
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
@@ -213,5 +241,12 @@ def test_the_proofreading_window(tmp_path):
     assert out["json_texts"] == ["Hello, everyone.", "Thank you, Sam.", "Let's start."]
     assert out["cancel_keeps_open"] and out["discard_closes"] and out["discarded"] == "Hello, everyone."
     assert out["reused"] and out["stray"] and out["forgotten"]
+    assert out["save_as"] and out["save_as_suggested"] == ["class_transcript (2).json"]  # replaces nothing
+    assert out["save_as_files"] == ["checked_transcript.json", "checked_transcript.txt"]  # the run's formats
+    assert out["save_as_text"] == "Hello, all." and out["save_as_clean"]
+    assert out["then_save"] == "Hello, you all." and out["originals_kept"]  # Save goes on with the new files
+    assert out["by_new_name"] and out["by_old_name"]
+    assert out["refused_while_open"] and out["asked_first"] and out["kept_when_no"]
+    assert out["all_forgotten"]
     assert out["big_rows"] == 3000 and out["no_recording"]
     assert out["big_seconds"] < 10, out["big_seconds"]

@@ -143,6 +143,53 @@ def test_a_locked_file_stops_the_save_before_anything_is_replaced(tmp_path, monk
     assert {p.name: p.read_bytes() for p in written} == before
 
 
+def test_save_as_writes_new_files_and_keeps_the_ones_it_came_from(tmp_path):
+    t = make_transcript()
+    written = write_outputs(t, tmp_path, ["txt", "srt"], ExportOptions())
+    json_path = next(p for p in written if p.suffix == ".json")
+    before = {p.name: p.read_bytes() for p in written}
+    (tmp_path / "checked").mkdir()
+    copy = tmp_path / "checked" / "class-checked_transcript.json"
+    proofread.set_text(t, 1, "Thank you, Sam.")
+    saved = proofread.save_as(t, json_path, copy, ExportOptions())
+    assert sorted(p.name for p in saved) == ["class-checked_transcript.json", "class-checked_transcript.srt",
+                                             "class-checked_transcript.txt"]  # the formats of the run
+    assert {p.parent for p in saved} == {copy.parent} and saved[-1] == copy  # the transcript last
+    assert Transcript.load(copy).segments[1].text == "Thank you, Sam."
+    assert "Thank you, Sam." in (copy.parent / "class-checked_transcript.txt").read_text(encoding="utf-8")
+    assert {p.name: p.read_bytes() for p in written} == before
+    assert not [p for p in copy.parent.iterdir() if p.name.startswith(".localscribe-")]
+
+
+def test_a_name_typed_for_save_as_becomes_a_transcript_name(tmp_path):
+    for typed in ("checked", "checked.json", "checked_transcript", "checked_transcript.json"):
+        assert proofread.transcript_path(tmp_path / typed) == tmp_path / "checked_transcript.json", typed
+    assert proofread.transcript_path(tmp_path / "class_transcript (2).json") == tmp_path / "class_transcript (2).json"
+
+
+def test_save_as_suggests_a_name_that_replaces_nothing(tmp_path):
+    written = write_outputs(make_transcript(), tmp_path, ["txt"], ExportOptions())
+    json_path = next(p for p in written if p.suffix == ".json")
+    assert proofread.save_as_name(json_path) == tmp_path / "class_transcript (2).json"
+    (tmp_path / "class_transcript (2).txt").write_text("another run", encoding="utf-8")
+    assert proofread.save_as_name(json_path) == tmp_path / "class_transcript (3).json"
+    assert proofread.save_as_files(json_path, tmp_path / "x_transcript.json") == [tmp_path / "x_transcript.txt",
+                                                                                  tmp_path / "x_transcript.json"]
+
+
+def test_a_folder_that_cannot_be_written_is_a_message(tmp_path, monkeypatch):
+    written = write_outputs(make_transcript(), tmp_path, ["txt"], ExportOptions())
+    json_path = next(p for p in written if p.suffix == ".json")
+
+    def refused(*args, **kwargs):  # as in a folder only administrators may write to
+        raise PermissionError(13, "Access is denied", str(Path(kwargs["dir"]) / ".localscribe-x"))
+
+    monkeypatch.setattr(proofread.tempfile, "mkdtemp", refused)
+    with pytest.raises(UserError) as caught:
+        proofread.save_as(make_transcript(), json_path, tmp_path / "x_transcript.json", ExportOptions())
+    assert caught.value.key == "err_write" and caught.value.kwargs["path"] == str(tmp_path / "x_transcript.json")
+
+
 def test_the_bundle_takes_sounddevice_with_one_portaudio_library():
     root = Path(__file__).resolve().parent.parent
     spec = (root / "packaging" / "localscribe.spec").read_text(encoding="utf-8")

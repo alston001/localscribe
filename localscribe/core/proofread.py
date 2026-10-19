@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from ..export import FORMATS
+from ..export import FORMATS, output_base
 from ..export.common import ExportOptions
 from .errors import UserError
 from .transcript import Transcript
@@ -126,6 +126,35 @@ def changed_since(json_path: Path) -> list[Path]:
     return [path for path in outputs_of(json_path).values() if path.stat().st_mtime > saved + _CHANGED_AFTER]
 
 
+def transcript_path(path: Path) -> Path:
+    """The file Save As writes for a name typed as `path`: a '<name>_transcript.json', as
+    LocalScribe names transcripts and the Proofread… dialog lists them."""
+    path = Path(path)
+    stem = path.name[:-len(".json")] if path.name.lower().endswith(".json") else path.name
+    if "_transcript" not in stem.lower():
+        stem += "_transcript"
+    return path.with_name(stem + ".json")
+
+
+def save_as_name(json_path: Path) -> Path:
+    """What Save As suggests for a copy of `json_path`: next to it, numbered as another run of the
+    same recording would be ('class_transcript (2).json'), so it replaces nothing."""
+    json_path = Path(json_path)
+    cut = json_path.stem.lower().rfind("_transcript")
+    stem = json_path.stem[:cut] if cut >= 0 else json_path.stem
+    return json_path.with_name(output_base(json_path.parent, stem, list(outputs_of(json_path))) + ".json")
+
+
+def _formats_as(json_path: Path, new_path: Path) -> dict[str, Path]:
+    new_path = Path(new_path)
+    return {fmt: new_path.with_name(new_path.stem + FORMATS[fmt][0]) for fmt in outputs_of(json_path)}
+
+
+def save_as_files(json_path: Path, new_path: Path) -> list[Path]:
+    """The files save_as writes: `json_path`'s formats under the new name, then the transcript."""
+    return [*_formats_as(json_path, new_path).values(), Path(new_path)]
+
+
 def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
     """Writes `t` over `json_path` and its formats (outputs_of) again, so the files from its run
     say what the proofread transcript says; returns them. Everything is written to a staging
@@ -133,9 +162,18 @@ def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
     locks a document it shows). The transcript goes last, so the exports are never newer.
     Speakers left without segments are not written; `t` itself keeps them."""
     json_path = Path(json_path)
+    return _write(t, json_path, outputs_of(json_path), options)
+
+
+def save_as(t: Transcript, json_path: Path, new_path: Path, options: ExportOptions) -> list[Path]:
+    """Writes `t` as `new_path`, in the formats saved next to `json_path`, the way save does
+    (save_as_files); the files at `json_path` stay as they were."""
+    return _write(t, Path(new_path), _formats_as(json_path, new_path), options)
+
+
+def _write(t: Transcript, json_path: Path, targets: dict[str, Path], options: ExportOptions) -> list[Path]:
     used = {seg.speaker for seg in t.segments}
     t = replace(t, speakers={sid: name for sid, name in t.speakers.items() if sid in used})
-    targets = outputs_of(json_path)
     for path in [*targets.values(), json_path]:
         if path.exists():
             try:
@@ -143,7 +181,10 @@ def save(t: Transcript, json_path: Path, options: ExportOptions) -> list[Path]:
                     pass
             except PermissionError as exc:
                 raise UserError("err_file_in_use", path=str(path)) from exc
-    staging = Path(tempfile.mkdtemp(prefix=".localscribe-", dir=json_path.parent))
+    try:
+        staging = Path(tempfile.mkdtemp(prefix=".localscribe-", dir=json_path.parent))
+    except OSError as exc:  # a folder this user may not write to
+        raise UserError("err_write", path=str(json_path)) from exc
     try:
         for fmt, path in targets.items():
             FORMATS[fmt][1](t, staging / path.name, options)
