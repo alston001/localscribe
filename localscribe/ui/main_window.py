@@ -819,7 +819,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, APP_NAME, tr("err_not_transcript", path=str(json_path)))
                 return None
             self._proofreaders.append(window)
-            window.closed.connect(self._proofreaders.remove)
+            # Forgotten once Qt has deleted it: dropping the last reference while it closes would
+            # delete it under Qt's feet.
+            window.destroyed.connect(lambda: self._proofreaders.remove(window))
         window.show()
         window.raise_()
         window.activateWindow()

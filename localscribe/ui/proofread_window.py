@@ -306,10 +306,12 @@ class FindEdit(QLineEdit):
 
 
 class ProofreadWindow(QMainWindow):
-    closed = Signal(object)  # this window, once it has closed
+    """Deleted once it closes: lambdas connected to its widgets' signals keep it alive otherwise, and
+    with it the decoded recording."""
 
     def __init__(self, json_path: Path, settings: Settings, recording: Path | None = None, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WA_DeleteOnClose)
         self.json_path = Path(json_path)
         self.settings = settings
         self.t = Transcript.load(self.json_path)  # UserError for an unreadable or newer file: the caller says so
@@ -963,5 +965,5 @@ class ProofreadWindow(QMainWindow):
         if self._loader is not None and not self._loader.wait(15000):  # a running QThread must not be destroyed
             event.ignore()
             return
-        self.closed.emit(self)
+        self.player = None  # the recording goes now, not when Python gets round to the window
         super().closeEvent(event)

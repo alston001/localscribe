@@ -193,7 +193,19 @@ out["reused"] = MainWindow.open_proofread(fake, json_path) is first and len(fake
 (folder / "other.json").write_text('{"name": "not a transcript"}', encoding="utf-8")
 out["stray"] = MainWindow.open_proofread(fake, folder / "other.json") is None and len(warnings) == 1
 first.close()
+app.processEvents()
 out["forgotten"] = fake._proofreaders == []
+
+# A closed window is deleted, and lets go of its recording (an hour takes 115 MB).
+import gc, weakref
+gone = MainWindow.open_proofread(fake, json_path)
+wait(lambda: gone.player is not None)
+kept = [weakref.ref(gone.player._samples), weakref.ref(gone)]
+gone.close()
+del gone
+app.processEvents()
+gc.collect()
+out["freed"] = [ref() is None for ref in kept] + [fake._proofreaders == []]
 
 # Save As: new files under the name typed; the window goes on with those, and the old ones stay.
 originals = {p.name: p.read_bytes() for p in folder.glob("class_transcript*")}
@@ -221,6 +233,7 @@ out["asked_first"] = not again.save_as() and ["checked_transcript.txt" in q and 
                                               for q in questions] == [True]
 out["kept_when_no"] = Transcript.load(folder / "checked_transcript.json").segments[0].text == "Hello, you all."
 again.close()
+app.processEvents()
 out["all_forgotten"] = fake._proofreaders == []
 
 # Scrolling stops the list following the audio too; double-clicking a time follows it again.
@@ -456,6 +469,7 @@ def test_the_proofreading_window(tmp_path):
     assert out["json_texts"] == ["Hello, everyone.", "Thank you, Sam.", "Let's start."]
     assert out["cancel_keeps_open"] and out["discard_closes"] and out["discarded"] == "Hello, everyone."
     assert out["reused"] and out["stray"] and out["forgotten"]
+    assert out["freed"] == [True, True, True]  # the recording, the window, and the main window's list of them
     assert out["save_as"] and out["save_as_suggested"] == ["class_transcript (2).json"]  # replaces nothing
     assert out["save_as_files"] == ["checked_transcript.json", "checked_transcript.txt"]  # the run's formats
     assert out["save_as_text"] == "Hello, all." and out["save_as_clean"]
