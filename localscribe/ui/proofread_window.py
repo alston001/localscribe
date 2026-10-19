@@ -226,7 +226,8 @@ class ProofreadWindow(QMainWindow):
         self.player: Player | None = None
         self._loader: RecordingLoader | None = None
         self._resume_at: float | None = None  # where a pause stopped, while the same row is current
-        self._following = False  # the row moves with the audio, not because the user picked one
+        self._moving = False  # the window moves the current row itself, not the user
+        self._follow = True  # the row follows the audio, until the user picks another row or scrolls
         self.recording = proofread.find_recording(self.t, self.json_path, recording)
         self._build()
         self._fill_speakers()
@@ -287,6 +288,7 @@ class ProofreadWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._row_menu)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_changed)
+        self.table.verticalScrollBar().actionTriggered.connect(self._stop_following)  # the wheel or the bar, not scrollTo
         self._relayout = QTimer(self, singleShot=True, interval=150)  # once a column stops changing width
         self._relayout.timeout.connect(self.table.resizeRowsToContents)
         header.sectionResized.connect(lambda column, *_: column == TEXT and self._relayout.start())
@@ -528,6 +530,7 @@ class ProofreadWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
             return
         self._resume_at = None
+        self._follow = True
         self.btn_play.setText(tr("pr_pause"))
         self.timer.start()
 
@@ -537,15 +540,19 @@ class ProofreadWindow(QMainWindow):
         self.btn_play.setText(tr("pr_play"))
 
     def _on_row_changed(self, *_) -> None:
-        if not self._following:
+        if not self._moving:
             self._resume_at = None  # a row the user picked plays from its start
+            self._stop_following()
+
+    def _stop_following(self, *_) -> None:
+        self._follow = False  # until playback starts again: the user is reading elsewhere
 
     def _select(self, row: int) -> None:
-        self._following = True
+        self._moving = True
         try:
             self.table.setCurrentIndex(self.model.index(row, TIME))
         finally:
-            self._following = False
+            self._moving = False
         self.table.scrollTo(self.model.index(row, TEXT))
 
     def _tick(self) -> None:
@@ -555,7 +562,7 @@ class ProofreadWindow(QMainWindow):
         self.lbl_time.setText(mmss(position))
         row = proofread.segment_at(self.t, position)
         editing = self.table.state() == QAbstractItemView.EditingState
-        if row is not None and row != self.table.currentIndex().row() and not editing:
+        if self._follow and row is not None and row != self.table.currentIndex().row() and not editing:
             self._select(row)
         if not self.player.playing:
             self._stop()

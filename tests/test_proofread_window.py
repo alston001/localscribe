@@ -43,7 +43,9 @@ sd = types.ModuleType("sounddevice")
 sd.OutputStream, sd.CallbackStop = Stream, CallbackStop
 sys.modules["sounddevice"] = sd
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QWheelEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 app = QApplication([])
 from localscribe import i18n
@@ -62,6 +64,14 @@ def wait(condition, seconds=20):
         app.processEvents()
         time.sleep(0.02)
     app.processEvents()
+
+
+def double_click(widget, pos):  # as Windows sends it: QTest.mouseDClick sends the double-click alone
+    for kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.MouseButtonDblClick,
+                 QEvent.MouseButtonRelease):
+        buttons = Qt.NoButton if kind == QEvent.MouseButtonRelease else Qt.LeftButton
+        QApplication.sendEvent(widget, QMouseEvent(kind, QPointF(pos), QPointF(widget.mapToGlobal(pos)), Qt.LeftButton,
+                                                   buttons, Qt.NoModifier))
 
 
 t = Transcript(
@@ -117,6 +127,19 @@ window.toggle_play()
 out["paused"] = not window.player.playing and window.btn_play.text() == "Play"
 window.toggle_play()
 out["resumed_at"] = round(window.player.position(), 2)
+window.toggle_play()
+
+# Clicking another row stops the list following the audio; playing again (Space) follows it again.
+view = window.table
+window.play_from(0)
+QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, view.visualRect(model.index(2, TEXT)).center())
+Stream.made[-1].callback(np.zeros((25600, 1), np.int16), 25600, None, None)  # on to the second segment
+window._tick()
+out["click_stays"] = view.currentIndex().row()
+QTest.keyClick(view, Qt.Key_Space)  # pause
+QTest.keyClick(view, Qt.Key_Space)  # and play on from there
+window._tick()
+out["space_follows"] = view.currentIndex().row()
 window.toggle_play()
 
 out["merged"] = window.merge_speaker("S2", "S1")
@@ -192,6 +215,38 @@ out["kept_when_no"] = Transcript.load(folder / "checked_transcript.json").segmen
 again.close()
 out["all_forgotten"] = fake._proofreaders == []
 
+# Scrolling stops the list following the audio too; double-clicking a time follows it again.
+with wave.open(str(folder / "many.wav"), "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(16000)
+    w.writeframes(np.zeros(16000 * 10, np.int16).tobytes())
+many = Transcript(source="many.wav", duration=10.0, language="en", created="", app_version="0.1.5", settings={},
+                  speakers={"S1": "Speaker 1"},
+                  segments=[Segment("S1", k / 10, k / 10 + 0.09, f"Line {k}.") for k in range(100)])
+many.save(folder / "many_transcript.json")
+scroller = ProofreadWindow(folder / "many_transcript.json", Settings())
+scroller.show()
+wait(lambda: scroller.player is not None)
+view = scroller.table
+scroller.play_from(0)
+middle = view.viewport().rect().center()
+QApplication.sendEvent(view.viewport(), QWheelEvent(QPointF(middle), QPointF(view.viewport().mapToGlobal(middle)), QPoint(),
+                                                    QPoint(0, -120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+out["wheel_scrolled"] = view.verticalScrollBar().value() > 0
+Stream.made[-1].callback(np.zeros((32000, 1), np.int16), 32000, None, None)  # 2 s on
+scroller._tick()
+out["scroll_stays"] = view.currentIndex().row()
+row = view.rowAt(middle.y())
+double_click(view.viewport(), view.visualRect(scroller.model.index(row, TIME)).center())
+followed = []
+for _ in range(2):  # the window scrolls to the audio itself, and that goes on following it
+    Stream.made[-1].callback(np.zeros((32000, 1), np.int16), 32000, None, None)
+    scroller._tick()
+    followed.append(view.currentIndex().row() - row)
+out["dclick_follows"] = followed
+scroller.close()
+
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
 segments = [Segment(f"S{1 + k % 3}", words[k * 10].start, words[k * 10 + 9].end,
@@ -230,6 +285,9 @@ def test_the_proofreading_window(tmp_path):
     assert out["speaker_edit"]
     assert out["streams"] == 1 and out["row_follows"] == 1  # the audio reached the second segment
     assert out["paused"] and out["resumed_at"] == 1.6  # play again goes on where the pause stopped
+    assert out["click_stays"] == 2 and out["space_follows"] == 1  # picked while playing: kept until play again
+    assert out["wheel_scrolled"] and out["scroll_stays"] == 0
+    assert out["dclick_follows"] == [20, 40]  # 2 s is 20 segments on
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
     assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
     assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]
