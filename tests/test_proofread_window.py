@@ -193,12 +193,25 @@ out["reused"] = MainWindow.open_proofread(fake, json_path) is first and len(fake
 (folder / "other.json").write_text('{"name": "not a transcript"}', encoding="utf-8")
 out["stray"] = MainWindow.open_proofread(fake, folder / "other.json") is None and len(warnings) == 1
 first.close()
+app.processEvents()
 out["forgotten"] = fake._proofreaders == []
+
+# A closed window is deleted, and lets go of its recording (an hour takes 115 MB).
+import gc, weakref
+gone = MainWindow.open_proofread(fake, json_path)
+wait(lambda: gone.player is not None)
+kept = [weakref.ref(gone.player._samples), weakref.ref(gone)]
+gone.close()
+del gone
+app.processEvents()
+gc.collect()
+out["freed"] = [ref() is None for ref in kept] + [fake._proofreaders == []]
 
 # Save As: new files under the name typed; the window goes on with those, and the old ones stay.
 originals = {p.name: p.read_bytes() for p in folder.glob("class_transcript*")}
 suggested = []
-QFileDialog.getSaveFileName = lambda *args, **kwargs: (suggested.append(Path(args[2]).name) or str(folder / "checked"), "")
+QFileDialog.getSaveFileName = lambda *args, **kwargs: (suggested.append(Path(args[2]).name)
+                                                       or str(folder / "checked"), "")
 copy = MainWindow.open_proofread(fake, json_path)
 copy.model.setData(copy.model.index(0, TEXT), "Hello, all.")
 out["save_as"] = copy.save_as()
@@ -221,6 +234,7 @@ out["asked_first"] = not again.save_as() and ["checked_transcript.txt" in q and 
                                               for q in questions] == [True]
 out["kept_when_no"] = Transcript.load(folder / "checked_transcript.json").segments[0].text == "Hello, you all."
 again.close()
+app.processEvents()
 out["all_forgotten"] = fake._proofreaders == []
 
 # Scrolling stops the list following the audio too; double-clicking a time follows it again.
@@ -239,8 +253,9 @@ wait(lambda: scroller.player is not None)
 view = scroller.table
 scroller.play_from(0)
 middle = view.viewport().rect().center()
-QApplication.sendEvent(view.viewport(), QWheelEvent(QPointF(middle), QPointF(view.viewport().mapToGlobal(middle)), QPoint(),
-                                                    QPoint(0, -120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+wheel = QWheelEvent(QPointF(middle), QPointF(view.viewport().mapToGlobal(middle)), QPoint(), QPoint(0, -120),
+                    Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+QApplication.sendEvent(view.viewport(), wheel)
 out["wheel_scrolled"] = view.verticalScrollBar().value() > 0
 Stream.made[-1].callback(np.zeros((32000, 1), np.int16), 32000, None, None)  # 2 s on
 scroller._tick()
@@ -322,7 +337,9 @@ editing = lambda: view.state() == QAbstractItemView.EditingState
 def edit_text(row, cursor):
     double_click(view.viewport(), view.visualRect(splitter.model.index(row, TEXT)).center())
     editor = QApplication.focusWidget()
-    editor.setCursorPosition(cursor)
+    place = editor.textCursor()
+    place.setPosition(cursor)
+    editor.setTextCursor(place)
     return editor
 
 
@@ -374,6 +391,51 @@ out["plays_on_after_edit"] = [splitter.player.playing, round(splitter.player.pos
 splitter.toggle_play()
 out["split_clean"] = not splitter.dirty
 splitter.close()
+
+# A long text wraps while it is edited, and the editor grows with it over the rows below. A
+# double-click selects the word clicked; Shift+Enter then splits before it.
+from PySide6.QtGui import QTextCursor
+long_text = " ".join(f"word{i}" for i in range(120))
+Transcript(source="none.wav", duration=40.0, language="en", created="", app_version="0.1.5", settings={},
+           speakers={"S1": "A"}, segments=[Segment("S1", 0.0, 30.0, long_text), Segment("S1", 31.0, 32.0, "Short one."),
+                                           Segment("S1", 33.0, 34.0, "Last.")]).save(folder / "long_transcript.json")
+wrapper = ProofreadWindow(folder / "long_transcript.json", Settings())
+wrapper.show()
+app.processEvents()
+view, metrics = wrapper.table, wrapper.table.fontMetrics()
+
+
+def word_at(row, before):  # a point inside the word after the text `before`, on its first line
+    cell = view.visualRect(wrapper.model.index(row, TEXT))
+    return QPoint(cell.left() + 4 + metrics.horizontalAdvance(before) + 2, cell.top() + 4 + metrics.height() // 2)
+
+
+cell = view.visualRect(wrapper.model.index(0, TEXT))
+double_click(view.viewport(), word_at(0, "word0 word1 "))
+app.processEvents()
+editor = QApplication.focusWidget()
+out["wraps"] = [type(editor).__name__, editor.textCursor().selectedText(), cell.height() > 3 * metrics.height(),
+                editor.height() >= cell.height(), editor.verticalScrollBar().maximum()]
+height = editor.height()
+editor.moveCursor(QTextCursor.End)
+QTest.keyClicks(editor, " and" * 60)
+app.processEvents()
+out["grows"] = [editor.height() > height, editor.verticalScrollBar().maximum()]
+QTest.keyClick(editor, Qt.Key_Return)
+app.processEvents()
+out["enter_commits"] = [wrapper.t.segments[0].text == long_text + " and" * 60, editing()]
+double_click(view.viewport(), word_at(1, "Short "))
+QTest.keyClicks(QApplication.focusWidget(), "typed")
+QTest.keyClick(QApplication.focusWidget(), Qt.Key_Escape)
+app.processEvents()
+out["esc_cancels"] = [wrapper.t.segments[1].text, editing()]
+double_click(view.viewport(), word_at(1, "Short "))
+editor = QApplication.focusWidget()
+out["word_picked"] = editor.textCursor().selectedText()
+QTest.keyClick(editor, Qt.Key_Return, Qt.ShiftModifier)
+app.processEvents()
+out["split_at_word"] = [s.text for s in wrapper.t.segments]
+wrapper.close()  # with the changes discarded, as QMessageBox.exec says above
 
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
@@ -445,6 +507,12 @@ def test_the_proofreading_window(tmp_path):
     assert out["space_goes_on"] == [True, 3.9]
     assert out["jumped"] == [1, 0.0] and out["jump_stops"] == [False, 0.9]
     assert out["plays_on_after_edit"] == [True, 5.0] and out["split_clean"]
+    assert out["wraps"] == ["TextEditor", "word2", True, True, 0]  # all of it in view, the word clicked selected
+    assert out["grows"] == [True, 0]
+    assert out["enter_commits"] == [True, False]  # and no line break in the text
+    assert out["esc_cancels"] == ["Short one.", False]
+    assert out["word_picked"] == "one"
+    assert out["split_at_word"][1:3] == ["Short", "one."]
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
     assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
     assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]
@@ -456,6 +524,7 @@ def test_the_proofreading_window(tmp_path):
     assert out["json_texts"] == ["Hello, everyone.", "Thank you, Sam.", "Let's start."]
     assert out["cancel_keeps_open"] and out["discard_closes"] and out["discarded"] == "Hello, everyone."
     assert out["reused"] and out["stray"] and out["forgotten"]
+    assert out["freed"] == [True, True, True]  # the recording, the window, and the main window's list of them
     assert out["save_as"] and out["save_as_suggested"] == ["class_transcript (2).json"]  # replaces nothing
     assert out["save_as_files"] == ["checked_transcript.json", "checked_transcript.txt"]  # the run's formats
     assert out["save_as_text"] == "Hello, all." and out["save_as_clean"]
