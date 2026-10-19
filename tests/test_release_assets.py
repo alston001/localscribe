@@ -56,22 +56,36 @@ def test_the_update_holds_what_changed_since_the_previous_release(ra):
     assert plan.update_from == ["0.1.3"]
 
 
+def sized(size: int, data: bytes) -> list:  # a file list entry for a library too big to write in a test
+    return [size, hashlib.sha256(data).hexdigest()]
+
+
 def test_older_versions_qualify_when_everything_else_is_the_same(ra):
-    torch = entry(b"torch 2.14")
+    torch = sized(2_500_000_000, b"torch 2.14")
     new = {"LocalScribe.exe": entry(b"exe 5"), "_internal/torch.dll": torch}
     bases = {"0.1.4": {"LocalScribe.exe": entry(b"exe 4"), "_internal/torch.dll": torch},
              "0.1.3": {"LocalScribe.exe": entry(b"exe 3"), "_internal/torch.dll": torch, "_internal/x.dll": entry(b"x")},
-             "0.1.2": {"LocalScribe.exe": entry(b"exe 2"), "_internal/torch.dll": entry(b"torch 2.13")}}
+             "0.1.2": {"LocalScribe.exe": entry(b"exe 2"), "_internal/torch.dll": sized(2_400_000_000, b"torch 2.13")}}
     plan = ra.plan_update(new, bases)
     assert plan.files == ["LocalScribe.exe"]
     assert plan.update_from == ["0.1.4", "0.1.3"]  # 0.1.2 has another torch: it needs the full installer
     assert plan.deletes == ["_internal/x.dll"]
 
 
+def test_an_older_version_that_lacks_a_few_small_files_gets_them_too(ra):
+    opencc = sized(3_000_000, b"opencc")  # added in between, as OpenCC was in 0.1.5
+    new = {"LocalScribe.exe": entry(b"exe 6"), "_internal/opencc.dll": opencc, "_internal/torch.dll": entry(b"t")}
+    bases = {"0.1.5": {"LocalScribe.exe": entry(b"exe 5"), "_internal/opencc.dll": opencc, "_internal/torch.dll": entry(b"t")},
+             "0.1.4": {"LocalScribe.exe": entry(b"exe 4"), "_internal/torch.dll": entry(b"t")}}
+    plan = ra.plan_update(new, bases)
+    assert plan.files == ["LocalScribe.exe", "_internal/opencc.dll"]  # 3 MB more, not 2.8 GB for 0.1.4
+    assert plan.update_from == ["0.1.5", "0.1.4"]
+
+
 def test_the_previous_release_is_found_by_number(ra):
-    new = {"LocalScribe.exe": entry(b"exe 10"), "a.dll": entry(b"a2")}
-    bases = {"0.1.9": {"LocalScribe.exe": entry(b"exe 9"), "a.dll": entry(b"a2")},
-             "0.1.1": {"LocalScribe.exe": entry(b"exe 1"), "a.dll": entry(b"a1")}}
+    new = {"LocalScribe.exe": entry(b"exe 10"), "a.dll": sized(500_000_000, b"a2")}
+    bases = {"0.1.9": {"LocalScribe.exe": entry(b"exe 9"), "a.dll": sized(500_000_000, b"a2")},
+             "0.1.1": {"LocalScribe.exe": entry(b"exe 1"), "a.dll": sized(500_000_000, b"a1")}}
     plan = ra.plan_update(new, bases)  # as text, "0.1.1" > "0.1.10" > "0.1.9"
     assert plan.files == ["LocalScribe.exe"] and plan.update_from == ["0.1.9"]
 

@@ -32,6 +32,7 @@ from localscribe.core.errors import UserError  # noqa: E402
 BUILD = ROOT / "build"  # the generated Inno file list goes here
 DEFAULT_ISCC = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe"
 MAX_UPDATE_BYTES = 1_500_000_000  # past this the update installer saves little: offer the full one
+MAX_EXTRA_BYTES = 100_000_000  # what an older release may need besides, for the update to take it too
 _BAD_CHARS = set('\\:*?"<>|') | {chr(c) for c in range(32)}
 
 
@@ -51,19 +52,25 @@ def file_list(bundle: Path) -> dict[str, list]:
 
 @dataclass
 class UpdatePlan:
-    files: list[str]        # to install: changed or new since the previous release
+    files: list[str]        # to install: changed or new since the previous release (or an older one it fits)
     deletes: list[str]      # left over from an older version the update fits
     update_from: list[str]  # the versions the update installer fits, newest first
 
 
 def plan_update(new: dict, bases: dict[str, dict]) -> UpdatePlan:
     """bases: {version: file list} of older releases. The update installer holds what changed
-    since the newest of them, and fits every one whose other files are the same as `new`."""
-    previous = bases[max(bases, key=update.parse_version)]
-    files = [rel for rel, meta in new.items() if previous.get(rel) != meta]
-    unchanged = set(new) - set(files)
-    fits = sorted((v for v, old in bases.items() if all(old.get(rel) == new[rel] for rel in unchanged)),
-                  key=update.parse_version, reverse=True)
+    since the newest of them, and fits every one whose other files are the same as `new`. An
+    older one that lacks only a few files besides, up to MAX_EXTRA_BYTES (OpenCC's, which came in
+    0.1.5, for 0.1.4), gets those in the update as well rather than the full installer; one with
+    another torch does not."""
+    versions = sorted(bases, key=update.parse_version, reverse=True)
+    files: set[str] = set()
+    fits = []
+    for version in versions:  # newest first, so each older one only adds what the newer ones lacked
+        extra = {rel for rel, meta in new.items() if bases[version].get(rel) != meta} - files
+        if version == versions[0] or sum(new[rel][0] for rel in extra) <= MAX_EXTRA_BYTES:
+            files |= extra
+            fits.append(version)
     deletes = sorted({rel for v in fits for rel in bases[v] if rel not in new})
     return UpdatePlan(sorted(files), deletes, fits)
 
