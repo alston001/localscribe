@@ -75,6 +75,38 @@ def test_deleting_a_segment_and_speakers_left_without_any():
     assert t.speakers == {"S1": "Speaker 1"}
 
 
+def test_splitting_a_segment_where_another_speaker_begins():
+    t = make_transcript()
+    t.segments[1:] = [Segment("S2", 1.5, 3.9, "Thanks Sam. Let's start.",
+                              [TWord(1.5, 1.9, " Thanks", 0.9), TWord(2.0, 2.4, " Sam.", 0.3),
+                               TWord(3.0, 3.4, " Let's", 0.9), TWord(3.5, 3.9, " start.", 0.9)])]
+    assert proofread.can_split("Thanks Sam. ", "Let's start.") and not proofread.can_split(" ", "Thanks Sam.")
+    new = proofread.split_segment(t, 1, "Thanks Sam. ", "Let's start.")
+    first = t.segments[1]
+    assert t.segments[2] is new and len(t.segments) == 3 and new.speaker == "S2"  # the same speaker, until changed
+    assert (first.text, first.start, first.end) == ("Thanks Sam.", 1.5, 2.4)
+    assert (new.text, new.start, new.end) == ("Let's start.", 3.0, 3.9)  # the time between the words
+    assert segment_words(first) is first.words and segment_words(new) is new.words  # unsure words stay marked
+
+
+def test_a_split_finds_its_time_in_an_edited_text_and_in_chinese():
+    t = make_transcript()
+    proofread.set_text(t, 0, "Hello there, everyone.")  # its words say " Hello," " everyone."
+    new = proofread.split_segment(t, 0, "Hello there,", " everyone.")
+    assert (t.segments[0].end, new.start) == (0.4, 0.5) and segment_words(new) is new.words
+    zh = Transcript(source="課.m4a", duration=2.0, language="zh", created="", app_version="0.1.5", settings={},
+                    speakers={"S1": "A"}, segments=[Segment("S1", 0.0, 1.9, "你好。我是", [
+                        TWord(0.0, 0.5, "你好", 0.9), TWord(0.5, 0.8, "。", 0.9), TWord(1.0, 1.4, "我", 0.9),
+                        TWord(1.4, 1.9, "是", 0.9)])])
+    new = proofread.split_segment(zh, 0, "你好。", "我是")
+    assert (zh.segments[0].text, zh.segments[0].end, new.text, new.start) == ("你好。", 0.8, "我是", 1.0)
+    plain = Transcript(source="x.wav", duration=12.0, language="en", created="", app_version="0.1.5", settings={},
+                       speakers={"S1": "A"}, segments=[Segment("S1", 10.0, 12.0, "One two. Three four.")])
+    new = proofread.split_segment(plain, 0, "One two. ", "Three four.")  # no words: by the length of the text
+    assert plain.segments[0].end == new.start == pytest.approx(10.8)
+    assert proofread.split_segment(plain, 0, "One two.", " ") is None and len(plain.segments) == 2
+
+
 def test_finding_text_in_the_segments():
     t = make_transcript()
     assert proofread.find(t, "sam") == [(1, 7, 10)]  # upper and lower case alike, unless asked
@@ -293,6 +325,20 @@ def test_playing_again_stops_the_stretch_before(fake_sound):
     assert FakeStream.made[0].closed and not FakeStream.made[1].closed
     player.stop()
     assert FakeStream.made[1].closed and not player.playing
+
+
+def test_where_the_playing_stretch_ends_can_move(fake_sound):
+    from localscribe.core.playback import Player
+
+    player = Player(np.full(16000 * 3, 0.5, np.float32))
+    player.play(0.0)
+    stream = FakeStream.made[-1]
+    player.set_end(0.25)
+    player.set_end(None)  # back to the end of the recording
+    assert stream.pull(8000).all()
+    player.set_end(0.75)  # 4,000 frames more
+    rest = stream.pull(8000)
+    assert rest[:4000].all() and not rest[4000:].any() and stream.pull(100) is None
 
 
 def test_no_sound_card_is_a_message_not_a_crash(fake_sound):

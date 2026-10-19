@@ -337,6 +337,7 @@ STRINGS: dict[str, tuple[str, str]] = {
     "pr_open_elsewhere": ("{name} 正在另一個校對視窗裡開著。請先關閉那個視窗，或選擇別的名稱。",
                           "{name} is open in another proofreading window. Close that window or choose another name."),
     "pr_saved_as": ("已另存 {n} 個檔案，現在校對的是 {name}。", "Saved {n} files. You are now proofreading {name}."),
+    "pr_split": ("已在游標處分成兩段，請選新的一段是誰說的。", "Split at the cursor. Pick who says the new segment."),
     "pr_find_placeholder": ("尋找", "Find"),
     "pr_replace_placeholder": ("取代為", "Replace with"),
     "pr_find_previous": ("上一個", "Previous"),
@@ -356,10 +357,11 @@ STRINGS: dict[str, tuple[str, str]] = {
                          "Not replaced: the segment would have no text left. To delete it, right-click it."),
     "pr_undo": ("復原", "Undo"),
     "pr_speakers": ("說話人", "Speakers"),
-    "pr_rename_hint": ("雙擊名稱可以改名。雙擊表格裡的時間會從那裡播放，空白鍵播放或暫停，雙擊文字可以修改。"
-                       "Ctrl+F 尋找，Ctrl+H 取代。",
+    "pr_rename_hint": ("雙擊名稱可以改名。雙擊表格裡的時間會從那裡播放，空白鍵播放或暫停，雙擊文字可以修改；"
+                       "改文字時按 Shift+Enter 會在游標處分成兩段。Ctrl+F 尋找，Ctrl+H 取代。",
                        "Double-click a name to rename it. Double-click a time to play from there, press Space to play "
-                       "or pause, and double-click the text to correct it. Ctrl+F finds text, Ctrl+H replaces it."),
+                       "or pause, and double-click the text to correct it; Shift+Enter there splits it at the cursor. "
+                       "Ctrl+F finds text, Ctrl+H replaces it."),
     "pr_merge": ("合併到…", "Merge into…"),
     "pr_merge_confirm": ("把「{source}」的段落都改成「{target}」，並移除「{source}」？",
                          "Give all of {source}'s segments to {target} and remove {source}?"),

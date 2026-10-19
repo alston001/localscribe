@@ -12,12 +12,13 @@ import logging
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRect, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QPersistentModelIndex, QRect, QSize, Qt,
+                            QThread, QTimer, Signal)
 from PySide6.QtGui import QFontMetrics, QKeySequence, QPalette, QShortcut, QTextDocument
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
-                               QMessageBox, QPushButton, QSplitter, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
-                               QTableView, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView, QApplication, QCheckBox, QComboBox,
+                               QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter, QStyle, QStyledItemDelegate,
+                               QStyleOptionViewItem, QTableView, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME
 from ..config import Settings
@@ -169,18 +170,35 @@ class SegmentModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(0, SPEAKER), self.index(len(self.t.segments) - 1, SPEAKER))
 
 
-class SpeakerDelegate(QStyledItemDelegate):
+class EditingDelegate(QStyledItemDelegate):
+    """Says when its editor opens, on which row, and when it closes: while the recording plays,
+    the window keeps to the segment being edited."""
+
+    editing_started = Signal(int)
+    editing_ended = Signal()
+
+    def destroyEditor(self, editor, index) -> None:
+        self.editing_ended.emit()
+        super().destroyEditor(editor, index)
+
+
+class SpeakerDelegate(EditingDelegate):
     """Picks a segment's speaker from the transcript's speakers."""
 
     def __init__(self, transcript: Transcript, parent=None):
         super().__init__(parent)
         self.t = transcript
+        self.open_list = False  # the next editor shows its list at once (for the segment a split made)
 
     def createEditor(self, parent, option, index):
+        self.editing_started.emit(index.row())
         combo = QComboBox(parent)
         for sid, name in self.t.speakers.items():
             combo.addItem(name, sid)
         combo.activated.connect(lambda _: (self.commitData.emit(combo), self.closeEditor.emit(combo)))
+        if self.open_list:
+            self.open_list = False
+            QTimer.singleShot(0, combo, combo.showPopup)  # once the table has placed it
         return combo
 
     def setEditorData(self, editor, index) -> None:
@@ -190,11 +208,13 @@ class SpeakerDelegate(QStyledItemDelegate):
         model.setData(index, editor.currentData(), Qt.EditRole)
 
 
-class TextDelegate(QStyledItemDelegate):
+class TextDelegate(EditingDelegate):
     """Wraps a segment's text and shows the words Whisper was unsure of in yellow, and what Find
     found in green. Rows get their height from the font's metrics, which wrap plain text the way
     the drawn document does: laying out a document for each of 3,000 rows took seconds whenever
-    the column changed width."""
+    the column changed width. While a text is edited, Shift+Enter splits it at the cursor."""
+
+    split = Signal(int, str, str)  # the row, and its text before the cursor and after it
 
     def __init__(self, view: QTableView, transcript: Transcript):
         super().__init__(view)
@@ -202,6 +222,23 @@ class TextDelegate(QStyledItemDelegate):
         self.t = transcript
         self.found: tuple[str, bool] | None = None  # (the text looked for, match case) while the find bar shows
         self.current: tuple[int, int, int] | None = None  # the match Next or Previous went to
+        self._editing = QPersistentModelIndex()
+
+    def createEditor(self, parent, option, index):
+        self._editing = QPersistentModelIndex(index)
+        self.editing_started.emit(index.row())
+        return super().createEditor(parent, option, index)
+
+    def eventFilter(self, editor, event) -> bool:
+        if (event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and event.modifiers() & Qt.ShiftModifier and isinstance(editor, QLineEdit)):
+            text, cursor = editor.text(), editor.cursorPosition()
+            if proofread.can_split(text[:cursor], text[cursor:]) and self._editing.isValid():
+                row = self._editing.row()
+                self.closeEditor.emit(editor, QAbstractItemDelegate.NoHint)  # the split takes the text as typed
+                self.split.emit(row, text[:cursor], text[cursor:])
+                return True
+        return super().eventFilter(editor, event)  # Enter finishes the edit
 
     def _document(self, index: QModelIndex, option, width: int) -> QTextDocument:
         row = index.row()
@@ -285,6 +322,7 @@ class ProofreadWindow(QMainWindow):
         self._moving = False  # the window moves the current row itself, not the user
         self._follow = True  # the row follows the audio, until the user picks another row or scrolls
         self._match: tuple[int, int, int] | None = None  # (row, start, end) of the match Find went to
+        self._edit_end: float | None = None  # where playback stops while a segment is being edited
         self.recording = proofread.find_recording(self.t, self.json_path, recording)
         self._build()
         self._fill_speakers()
@@ -334,9 +372,14 @@ class ProofreadWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.table.setWordWrap(True)
-        self.table.setItemDelegateForColumn(SPEAKER, SpeakerDelegate(self.t, self.table))
+        self.speaker_delegate = SpeakerDelegate(self.t, self.table)
+        self.table.setItemDelegateForColumn(SPEAKER, self.speaker_delegate)
         self.text_delegate = TextDelegate(self.table, self.t)
         self.table.setItemDelegateForColumn(TEXT, self.text_delegate)
+        for delegate in (self.speaker_delegate, self.text_delegate):
+            delegate.editing_started.connect(self._on_editing_started)
+            delegate.editing_ended.connect(self._on_editing_ended)
+        self.text_delegate.split.connect(self.split_segment, Qt.QueuedConnection)  # once its editor has closed
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(TIME, QHeaderView.Fixed)  # sizing it to its contents would read every row
         header.setSectionResizeMode(SPEAKER, QHeaderView.Interactive)
@@ -578,6 +621,34 @@ class ProofreadWindow(QMainWindow):
         if index.column() == TIME:
             self.play_from(index.row())
 
+    def split_segment(self, row: int, before: str, after: str) -> bool:
+        """Splits segment `row` into the text `before` the cursor and the text `after` it, which goes to
+        a new segment below, and opens the list of speakers for that one (Shift+Enter)."""
+        if not 0 <= row < len(self.t.segments) or not proofread.can_split(before, after):
+            return False
+        seg = self.t.segments[row]
+        old = seg.text, seg.end, seg.words
+        self.model.beginInsertRows(QModelIndex(), row + 1, row + 1)
+        proofread.split_segment(self.t, row, before, after)
+        self.model.endInsertRows()
+        self.model.row_changed(row)
+
+        def undo():  # the edits after this one are undone already, so the rows are where they were
+            self.model.beginRemoveRows(QModelIndex(), row + 1, row + 1)
+            del self.t.segments[row + 1]
+            self.model.endRemoveRows()
+            seg.text, seg.end, seg.words = old
+            self.model.row_changed(row)
+            self._fill_speakers()
+        self._remember(undo)
+        self._fill_speakers()
+        self.lbl_status.setText(tr("pr_split"))
+        index = self.model.index(row + 1, SPEAKER)
+        self.table.setCurrentIndex(index)
+        self.speaker_delegate.open_list = True
+        self.table.edit(index)
+        return True
+
     # -------------------------------------------------------------------- find
     def show_find(self) -> None:
         self._open_find(replace=False)
@@ -759,9 +830,9 @@ class ProofreadWindow(QMainWindow):
         self._select(row)
         self._start(self.t.segments[row].start)
 
-    def _start(self, seconds: float) -> None:
+    def _start(self, seconds: float, end: float | None = None) -> None:
         try:
-            self.player.play(seconds)
+            self.player.play(seconds, end)
         except UserError as exc:
             QMessageBox.warning(self, APP_NAME, tr(exc.key, **exc.kwargs))
             return
@@ -784,6 +855,24 @@ class ProofreadWindow(QMainWindow):
     def _stop_following(self, *_) -> None:
         self._follow = False  # until playback starts again: the user is reading elsewhere
 
+    def _on_editing_started(self, row: int) -> None:
+        """While the recording plays, editing a segment plays just that one, so the audio doesn't run
+        ahead of the edit: on from where it is while that is inside it, else from its start, and it
+        stops at the segment's end."""
+        if self.player is None or not self.player.playing or not 0 <= row < len(self.t.segments):
+            return
+        seg = self.t.segments[row]
+        if seg.start <= self.player.position() < seg.end:
+            self.player.set_end(seg.end)
+        else:
+            self._start(seg.start, seg.end)
+        self._edit_end = seg.end
+
+    def _on_editing_ended(self) -> None:
+        if self._edit_end is not None and self.player is not None and self.player.playing:
+            self.player.set_end(None)  # the edit is done before the segment: play on
+        self._edit_end = None
+
     def _select(self, row: int) -> None:
         self._moving = True
         try:
@@ -802,6 +891,8 @@ class ProofreadWindow(QMainWindow):
         if self._follow and row is not None and row != self.table.currentIndex().row() and not editing:
             self._select(row)
         if not self.player.playing:
+            if self._edit_end is not None:
+                self._resume_at = position  # it stopped at the end of the segment being edited: Space goes on
             self._stop()
 
     # -------------------------------------------------------------------- save

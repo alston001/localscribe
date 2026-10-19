@@ -18,7 +18,7 @@ from typing import NamedTuple
 from ..export import FORMATS, output_base
 from ..export.common import ExportOptions
 from .errors import UserError
-from .transcript import Transcript
+from .transcript import Segment, Transcript
 
 # An export saved this many seconds or more after its transcript was changed since, probably by
 # hand, so the window asks before writing over it.
@@ -41,6 +41,35 @@ def set_text(t: Transcript, index: int, text: str) -> bool:
 
 def delete_segment(t: Transcript, index: int) -> None:
     del t.segments[index]
+
+
+def can_split(before: str, after: str) -> bool:
+    return bool(_clean(before) and _clean(after))
+
+
+def split_segment(t: Transcript, index: int, before: str, after: str) -> Segment | None:
+    """Splits segment `index` where another speaker begins: it keeps the text `before` (the cursor)
+    and a new segment `index + 1` of the same speaker gets `after`, with the words of each. They
+    meet between the two words nearest the split, in proportion when the text was edited, or by
+    the length of the text when no words tell. The new segment, or None when a side has no text."""
+    if not can_split(before, after):
+        return None
+    seg = t.segments[index]
+    first, second = _clean(before), _clean(after)
+    share = len(first) / len(_clean(before + after))
+    words = seg.words
+    if len(words) >= 2:
+        lengths = [len(_clean("".join(w.text for w in words[:k]))) for k in range(len(words) + 1)]
+        k = min(range(1, len(words)), key=lambda k: abs(lengths[k] - share * lengths[-1]))
+        start = min(max(words[k].start, seg.start), seg.end)
+        end = min(max(words[k - 1].end, seg.start), start)
+    else:
+        start = end = seg.start + (seg.end - seg.start) * share
+        k = sum(1 for w in words if w.end <= start)
+    new = Segment(seg.speaker, start, seg.end, second, words[k:])
+    seg.text, seg.end, seg.words = first, end, words[:k]
+    t.segments.insert(index + 1, new)
+    return new
 
 
 def set_speaker(t: Transcript, index: int, speaker_id: str) -> bool:

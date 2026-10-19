@@ -22,7 +22,7 @@ class Stream:  # a sound card that keeps what it is asked to play
     made = []
 
     def __init__(self, samplerate, channels, dtype, callback, finished_callback=None):
-        self.callback = callback
+        self.callback, self.finished = callback, finished_callback
         Stream.made.append(self)
 
     def start(self):
@@ -64,6 +64,14 @@ def wait(condition, seconds=20):
         app.processEvents()
         time.sleep(0.02)
     app.processEvents()
+
+
+def play_frames(frames):  # the sound card takes more; once the callback stops, PortAudio says it finished
+    stream = Stream.made[-1]
+    try:
+        stream.callback(np.zeros((frames, 1), np.int16), frames, None, None)
+    except CallbackStop:
+        stream.finished()
 
 
 def double_click(widget, pos):  # as Windows sends it: QTest.mouseDClick sends the double-click alone
@@ -293,6 +301,80 @@ QTest.keyClick(finder.edit_find, Qt.Key_Escape)
 out["find_hidden"] = [finder.find_bar.isVisible(), delegate.found, finder.table.hasFocus()]
 finder.close()
 
+# Shift+Enter splits a text at the cursor, and the list of speakers opens for the new segment.
+from PySide6.QtWidgets import QAbstractItemView, QComboBox
+Transcript(source="class.wav", duration=5.0, language="en", created="", app_version="0.1.5", settings={},
+           speakers={"S1": "Speaker 1", "S2": "Speaker 2"},
+           segments=[Segment("S1", 0.0, 0.9, "Hello, everyone.", [TWord(0.0, 0.4, " Hello,", 0.9),
+                                                                   TWord(0.5, 0.9, " everyone.", 0.9)]),
+                     Segment("S2", 1.5, 3.9, "Thanks Sam. Let's start.", [
+                         TWord(1.5, 1.9, " Thanks", 0.9), TWord(2.0, 2.4, " Sam.", 0.9),
+                         TWord(3.0, 3.4, " Let's", 0.9), TWord(3.5, 3.9, " start.", 0.9)]),
+                     Segment("S1", 4.0, 4.9, "Good.", [TWord(4.0, 4.5, " Good.", 0.9)])]
+           ).save(folder / "split_transcript.json")
+splitter = ProofreadWindow(folder / "split_transcript.json", Settings())
+splitter.show()
+wait(lambda: splitter.player is not None)
+view = splitter.table
+editing = lambda: view.state() == QAbstractItemView.EditingState
+
+
+def edit_text(row, cursor):
+    double_click(view.viewport(), view.visualRect(splitter.model.index(row, TEXT)).center())
+    editor = QApplication.focusWidget()
+    editor.setCursorPosition(cursor)
+    return editor
+
+
+QTest.keyClick(edit_text(1, 12), Qt.Key_Return)  # Enter still only finishes the edit
+app.processEvents()
+out["enter_keeps"] = [len(splitter.t.segments), editing()]
+QTest.keyClick(edit_text(1, 12), Qt.Key_Return, Qt.ShiftModifier)  # "Thanks Sam. |Let's start."
+app.processEvents()
+out["split"] = [[s.speaker, s.start, s.end, s.text] for s in splitter.t.segments]
+combo = next((c for c in view.viewport().findChildren(QComboBox) if c.isVisible()), None)
+wait(lambda: combo is not None and combo.view().isVisible(), 5)
+out["asks_speaker"] = [editing(), view.currentIndex().row(), view.currentIndex().column(),
+                       combo is not None and combo.view().isVisible()]
+combo.view().setCurrentIndex(combo.model().index(combo.findData("S1"), 0))
+QTest.keyClick(combo.view(), Qt.Key_Return)  # picked in the open list
+splitter.activateWindow()  # as Windows does once the list closes; the offscreen platform doesn't
+app.processEvents()
+out["picked"] = [s.speaker for s in splitter.t.segments]
+splitter.undo()
+out["speaker_undone"] = [s.speaker for s in splitter.t.segments]
+splitter.undo()
+out["split_undone"] = [[s.speaker, s.start, s.end, s.text, len(s.words)] for s in splitter.t.segments]
+
+# While a text is being edited, only its segment plays: to its end, and from its start if the audio
+# was elsewhere. Space then goes on after it.
+splitter.play_from(1)
+editor = edit_text(1, 0)
+play_frames(16000)
+out["edit_plays_on"] = splitter.player.playing  # 2.5 s, inside the segment
+play_frames(32000)
+splitter._tick()
+out["edit_stops"] = [splitter.player.playing, round(splitter.player.position(), 2), splitter.btn_play.text()]
+QTest.keyClick(editor, Qt.Key_Return)
+app.processEvents()  # Qt closes the editor once Enter's event is done
+QTest.keyClick(view, Qt.Key_Space)
+out["space_goes_on"] = [splitter.player.playing, round(splitter.player.position(), 2)]
+streams = len(Stream.made)
+editor = edit_text(0, 0)  # the audio is at 3.9 s, and the first segment is edited
+out["jumped"] = [len(Stream.made) - streams, round(splitter.player.position(), 2)]
+play_frames(32000)
+splitter._tick()
+out["jump_stops"] = [splitter.player.playing, round(splitter.player.position(), 2)]
+QTest.keyClick(editor, Qt.Key_Escape)
+splitter.play_from(2)
+QTest.keyClick(edit_text(2, 0), Qt.Key_Return)  # done before the segment ends: it plays on
+app.processEvents()
+play_frames(16000)
+out["plays_on_after_edit"] = [splitter.player.playing, round(splitter.player.position(), 2)]
+splitter.toggle_play()
+out["split_clean"] = not splitter.dirty
+splitter.close()
+
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
 segments = [Segment(f"S{1 + k % 3}", words[k * 10].start, words[k * 10 + 9].end,
@@ -352,6 +434,17 @@ def test_the_proofreading_window(tmp_path):
     assert out["replace_finds_first"] == [False, [0, 0, 3], "Sam said hello to Sam.", "1 of 3"]  # shown, not replaced
     assert out["never_empty"] == [False, "Nothing.", True]
     assert out["find_hidden"] == [False, None, True]
+    assert out["enter_keeps"] == [3, False]
+    assert out["split"] == [["S1", 0.0, 0.9, "Hello, everyone."], ["S2", 1.5, 2.4, "Thanks Sam."],
+                            ["S2", 3.0, 3.9, "Let's start."], ["S1", 4.0, 4.9, "Good."]]
+    assert out["asks_speaker"] == [True, 2, 1, True]  # the new segment's speaker, its list open
+    assert out["picked"] == ["S1", "S2", "S1", "S1"] and out["speaker_undone"] == ["S1", "S2", "S2", "S1"]
+    assert out["split_undone"] == [["S1", 0.0, 0.9, "Hello, everyone.", 2],
+                                   ["S2", 1.5, 3.9, "Thanks Sam. Let's start.", 4], ["S1", 4.0, 4.9, "Good.", 1]]
+    assert out["edit_plays_on"] and out["edit_stops"] == [False, 3.9, "Play"]
+    assert out["space_goes_on"] == [True, 3.9]
+    assert out["jumped"] == [1, 0.0] and out["jump_stops"] == [False, 0.9]
+    assert out["plays_on_after_edit"] == [True, 5.0] and out["split_clean"]
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
     assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
     assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]

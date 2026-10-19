@@ -59,6 +59,11 @@ class Player:
             raise UserError("err_playback", detail=str(exc)) from exc
         self._stream = stream
 
+    def set_end(self, end: float | None) -> None:
+        """Moves where the stretch playing now stops: `end`, or the end of the recording when None."""
+        self._stop_at = len(self._samples) if end is None else min(max(int(round(end * self.rate)), 0),
+                                                                     len(self._samples))
+
     def _finished(self) -> None:
         self._done = True  # PortAudio's thread may not close its own stream: stop() does that
 
