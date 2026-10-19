@@ -210,7 +210,8 @@ out["freed"] = [ref() is None for ref in kept] + [fake._proofreaders == []]
 # Save As: new files under the name typed; the window goes on with those, and the old ones stay.
 originals = {p.name: p.read_bytes() for p in folder.glob("class_transcript*")}
 suggested = []
-QFileDialog.getSaveFileName = lambda *args, **kwargs: (suggested.append(Path(args[2]).name) or str(folder / "checked"), "")
+QFileDialog.getSaveFileName = lambda *args, **kwargs: (suggested.append(Path(args[2]).name)
+                                                       or str(folder / "checked"), "")
 copy = MainWindow.open_proofread(fake, json_path)
 copy.model.setData(copy.model.index(0, TEXT), "Hello, all.")
 out["save_as"] = copy.save_as()
@@ -252,8 +253,9 @@ wait(lambda: scroller.player is not None)
 view = scroller.table
 scroller.play_from(0)
 middle = view.viewport().rect().center()
-QApplication.sendEvent(view.viewport(), QWheelEvent(QPointF(middle), QPointF(view.viewport().mapToGlobal(middle)), QPoint(),
-                                                    QPoint(0, -120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+wheel = QWheelEvent(QPointF(middle), QPointF(view.viewport().mapToGlobal(middle)), QPoint(), QPoint(0, -120),
+                    Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+QApplication.sendEvent(view.viewport(), wheel)
 out["wheel_scrolled"] = view.verticalScrollBar().value() > 0
 Stream.made[-1].callback(np.zeros((32000, 1), np.int16), 32000, None, None)  # 2 s on
 scroller._tick()
