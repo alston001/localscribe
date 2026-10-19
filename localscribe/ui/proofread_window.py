@@ -9,16 +9,17 @@ from __future__ import annotations
 import html
 import itertools
 import logging
+import math
 from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QPersistentModelIndex, QRect, QSize, Qt,
                             QThread, QTimer, Signal)
-from PySide6.QtGui import QFontMetrics, QKeySequence, QPalette, QShortcut, QTextDocument
+from PySide6.QtGui import QFontMetrics, QKeySequence, QPalette, QShortcut, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (QAbstractItemDelegate, QAbstractItemView, QApplication, QCheckBox, QComboBox,
                                QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QSplitter, QStyle, QStyledItemDelegate,
-                               QStyleOptionViewItem, QTableView, QToolButton, QVBoxLayout, QWidget)
+                               QStyleOptionViewItem, QTableView, QTextEdit, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME
 from ..config import Settings
@@ -208,15 +209,46 @@ class SpeakerDelegate(EditingDelegate):
         model.setData(index, editor.currentData(), Qt.EditRole)
 
 
+class TextEditor(QTextEdit):
+    """A segment's text while it is edited, wrapped as the table shows it, so all of it stays in
+    view. It grows down over the rows below while the text needs the room, as far as the bottom of
+    the table: making the row taller on each key would lay every row out again (0.2 s for 3,000).
+    A QTextEdit, since the style sheet makes every QPlainTextEdit look like the log."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setStyleSheet(f"QTextEdit {{ border: 1px solid {style.ACCENT}; }}")
+        self.ensurePolished()
+        self.document().setDocumentMargin(_MARGIN)
+        self._cell = QRect()
+        self.document().documentLayout().documentSizeChanged.connect(self._fit)
+
+    def place(self, cell: QRect) -> None:
+        self._cell = QRect(cell)
+        self.setGeometry(cell)
+        self.document().setTextWidth(max(cell.width() - 2 * self.frameWidth(), 1))  # before it is shown, too
+        self._fit()
+
+    def _fit(self, *_) -> None:
+        if self._cell.isNull():
+            return
+        wanted = math.ceil(self.document().size().height()) + 2 * self.frameWidth()
+        room = self.parentWidget().height() - self._cell.top()
+        self.resize(self._cell.width(), max(self._cell.height(), min(wanted, room)))
+
+
 class TextDelegate(EditingDelegate):
     """Wraps a segment's text and shows the words Whisper was unsure of in yellow, and what Find
     found in green. Rows get their height from the font's metrics, which wrap plain text the way
     the drawn document does: laying out a document for each of 3,000 rows took seconds whenever
-    the column changed width. While a text is edited, Shift+Enter splits it at the cursor."""
+    the column changed width. Texts are edited in a TextEditor: Enter finishes, and Shift+Enter
+    splits the text at the cursor (before the word a double-click selected)."""
 
     split = Signal(int, str, str)  # the row, and its text before the cursor and after it
 
-    def __init__(self, view: QTableView, transcript: Transcript):
+    def __init__(self, view: SegmentTable, transcript: Transcript):
         super().__init__(view)
         self.view = view
         self.t = transcript
@@ -227,18 +259,43 @@ class TextDelegate(EditingDelegate):
     def createEditor(self, parent, option, index):
         self._editing = QPersistentModelIndex(index)
         self.editing_started.emit(index.row())
-        return super().createEditor(parent, option, index)
+        return TextEditor(parent)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:
+        editor.place(option.rect)
+
+    def setEditorData(self, editor, index) -> None:
+        text = index.data(Qt.EditRole)
+        if editor.toPlainText() == text:
+            return  # the same text again: keep the cursor
+        editor.setPlainText(text)
+        cursor = editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        clicked = self.view.double_clicked_at
+        if clicked is not None:  # the word double-clicked is selected, as in any editor
+            at = editor.cursorForPosition(editor.viewport().mapFrom(self.view.viewport(), clicked))
+            if at.position() < len(text):
+                at.select(QTextCursor.WordUnderCursor)
+                cursor = at
+        editor.setTextCursor(cursor)
+
+    def setModelData(self, editor, model, index) -> None:
+        model.setData(index, editor.toPlainText(), Qt.EditRole)
 
     def eventFilter(self, editor, event) -> bool:
         if (event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter)
-                and event.modifiers() & Qt.ShiftModifier and isinstance(editor, QLineEdit)):
-            text, cursor = editor.text(), editor.cursorPosition()
-            if proofread.can_split(text[:cursor], text[cursor:]) and self._editing.isValid():
+                and isinstance(editor, TextEditor)):  # never a line break in a segment
+            text, cursor = editor.toPlainText(), editor.textCursor().selectionStart()
+            if (event.modifiers() & Qt.ShiftModifier and proofread.can_split(text[:cursor], text[cursor:])
+                    and self._editing.isValid()):
                 row = self._editing.row()
                 self.closeEditor.emit(editor, QAbstractItemDelegate.NoHint)  # the split takes the text as typed
                 self.split.emit(row, text[:cursor], text[cursor:])
-                return True
-        return super().eventFilter(editor, event)  # Enter finishes the edit
+            else:
+                self.commitData.emit(editor)
+                self.closeEditor.emit(editor, QAbstractItemDelegate.NoHint)
+            return True
+        return super().eventFilter(editor, event)  # Esc, Tab and leaving the cell as before
 
     def _document(self, index: QModelIndex, option, width: int) -> QTextDocument:
         row = index.row()
@@ -285,6 +342,17 @@ class SegmentTable(QTableView):
     """Space plays or pauses while no cell is being edited."""
 
     play_pause = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.double_clicked_at = None  # where the double-click that is opening an editor was (the viewport's QPoint)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.double_clicked_at = event.position().toPoint()
+        try:
+            super().mouseDoubleClickEvent(event)  # opens the editor, if it does, before returning
+        finally:
+            self.double_clicked_at = None
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Space and self.state() != QAbstractItemView.EditingState:

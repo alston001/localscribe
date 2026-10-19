@@ -335,7 +335,9 @@ editing = lambda: view.state() == QAbstractItemView.EditingState
 def edit_text(row, cursor):
     double_click(view.viewport(), view.visualRect(splitter.model.index(row, TEXT)).center())
     editor = QApplication.focusWidget()
-    editor.setCursorPosition(cursor)
+    place = editor.textCursor()
+    place.setPosition(cursor)
+    editor.setTextCursor(place)
     return editor
 
 
@@ -387,6 +389,51 @@ out["plays_on_after_edit"] = [splitter.player.playing, round(splitter.player.pos
 splitter.toggle_play()
 out["split_clean"] = not splitter.dirty
 splitter.close()
+
+# A long text wraps while it is edited, and the editor grows with it over the rows below. A
+# double-click selects the word clicked; Shift+Enter then splits before it.
+from PySide6.QtGui import QTextCursor
+long_text = " ".join(f"word{i}" for i in range(120))
+Transcript(source="none.wav", duration=40.0, language="en", created="", app_version="0.1.5", settings={},
+           speakers={"S1": "A"}, segments=[Segment("S1", 0.0, 30.0, long_text), Segment("S1", 31.0, 32.0, "Short one."),
+                                           Segment("S1", 33.0, 34.0, "Last.")]).save(folder / "long_transcript.json")
+wrapper = ProofreadWindow(folder / "long_transcript.json", Settings())
+wrapper.show()
+app.processEvents()
+view, metrics = wrapper.table, wrapper.table.fontMetrics()
+
+
+def word_at(row, before):  # a point inside the word after the text `before`, on its first line
+    cell = view.visualRect(wrapper.model.index(row, TEXT))
+    return QPoint(cell.left() + 4 + metrics.horizontalAdvance(before) + 2, cell.top() + 4 + metrics.height() // 2)
+
+
+cell = view.visualRect(wrapper.model.index(0, TEXT))
+double_click(view.viewport(), word_at(0, "word0 word1 "))
+app.processEvents()
+editor = QApplication.focusWidget()
+out["wraps"] = [type(editor).__name__, editor.textCursor().selectedText(), cell.height() > 3 * metrics.height(),
+                editor.height() >= cell.height(), editor.verticalScrollBar().maximum()]
+height = editor.height()
+editor.moveCursor(QTextCursor.End)
+QTest.keyClicks(editor, " and" * 60)
+app.processEvents()
+out["grows"] = [editor.height() > height, editor.verticalScrollBar().maximum()]
+QTest.keyClick(editor, Qt.Key_Return)
+app.processEvents()
+out["enter_commits"] = [wrapper.t.segments[0].text == long_text + " and" * 60, editing()]
+double_click(view.viewport(), word_at(1, "Short "))
+QTest.keyClicks(QApplication.focusWidget(), "typed")
+QTest.keyClick(QApplication.focusWidget(), Qt.Key_Escape)
+app.processEvents()
+out["esc_cancels"] = [wrapper.t.segments[1].text, editing()]
+double_click(view.viewport(), word_at(1, "Short "))
+editor = QApplication.focusWidget()
+out["word_picked"] = editor.textCursor().selectedText()
+QTest.keyClick(editor, Qt.Key_Return, Qt.ShiftModifier)
+app.processEvents()
+out["split_at_word"] = [s.text for s in wrapper.t.segments]
+wrapper.close()  # with the changes discarded, as QMessageBox.exec says above
 
 # A long lecture opens quickly.
 words = [TWord(i * 0.5, i * 0.5 + 0.4, f" word{i % 50}", 0.2 if i % 7 == 0 else 0.9) for i in range(30000)]
@@ -458,6 +505,12 @@ def test_the_proofreading_window(tmp_path):
     assert out["space_goes_on"] == [True, 3.9]
     assert out["jumped"] == [1, 0.0] and out["jump_stops"] == [False, 0.9]
     assert out["plays_on_after_edit"] == [True, 5.0] and out["split_clean"]
+    assert out["wraps"] == ["TextEditor", "word2", True, True, 0]  # all of it in view, the word clicked selected
+    assert out["grows"] == [True, 0]
+    assert out["enter_commits"] == [True, False]  # and no line break in the text
+    assert out["esc_cancels"] == ["Short one.", False]
+    assert out["word_picked"] == "one"
+    assert out["split_at_word"][1:3] == ["Short", "one."]
     assert out["merged"] == 2 and out["speakers_merged"] == {"S1": "Prof. Lee"}
     assert out["unmerged"] == [{"S1": "Prof. Lee", "S2": "Speaker 2"}, ["S1", "S2", "S2"]]
     assert out["rows_after_delete"] == 2 and out["rows_after_undo"] == [3, "Hello, everyone."]
